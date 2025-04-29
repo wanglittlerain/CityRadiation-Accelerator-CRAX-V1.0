@@ -221,5 +221,5 @@ public:
         return true;
     }
 };
-static const GeneratePolyhedron sGP;
+static const GeneratePolyhedron g_GP;
 #endif

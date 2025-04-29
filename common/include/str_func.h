@@ -7,10 +7,12 @@
 #include <ranges>
 #include <fstream>
 namespace sfunc {
-inline void split(std::vector<std::string>& list, std::string_view str, std::string_view delim) {
-    for (const auto unit : std::views::split(str, delim)) {
-        list.emplace_back(unit.begin(), unit.end());
-    }
+inline auto split(std::string_view str, std::string_view delim) {
+    auto v = str | std::views::split(delim) | std::views::transform([](auto&& unit) {
+        return std::string(unit.begin(), unit.end());
+    });
+    std::vector<std::string> vs{v.begin(), v.end()};
+    return vs;
 }
 
 inline bool trimr(std::string& str) {

@@ -78,15 +78,21 @@ inline bool pointInPolys(const bg_point& p, const Polys& polys) {
     return false;
 }
 
+inline bool intersectArea(const bg_polygon& poly1, const bg_polygon& poly2, double& area) {
+    Polys out;
+    if (boost::geometry::intersection(poly1, poly2, out) && !out.empty()) {
+        for (auto& o : out) {
+            area += std::abs(boost::geometry::area(o));
+        }
+        return true;
+    }
+    return false;
+}
+
 inline double intersectArea(const bg_polygon& poly, const Polys& polys) {
     auto area{0.0};
     for (auto& p : polys) {
-        Polys out;
-        if (boost::geometry::intersection(poly, p, out) && !out.empty()) {
-            for (auto& o : out) {
-                area += std::abs(boost::geometry::area(o));
-            }
-        }
+        intersectArea(poly, p, area);
     }
     return area;
 }

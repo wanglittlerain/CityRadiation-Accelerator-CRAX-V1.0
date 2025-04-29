@@ -27,14 +27,14 @@ public:
 
     inline void view(const std::string_view str, bool run = true) {
         auto now{std::chrono::system_clock::now()};
-        std::chrono::microseconds d{};
+        std::chrono::milliseconds d{};
         if (run) {
-            d = std::chrono::duration_cast<std::chrono::microseconds>(now - _run);
+            d = std::chrono::duration_cast<std::chrono::milliseconds>(now - _run);
             _run = now;
         } else {
-            d = std::chrono::duration_cast<std::chrono::microseconds>(now - _all);
+            d = std::chrono::duration_cast<std::chrono::milliseconds>(now - _all);
         }
-        std::cout << std::format("{}{}s\n", str, d.count() / 1000000);
+        std::cout << std::format("{}{}s\n", str, d.count() * 1e-3);
     }
 private:
     std::chrono::system_clock::time_point _all;

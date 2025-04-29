@@ -25,13 +25,12 @@ struct StepCoef {
     double c4{};
 };
 
-inline void dr_coef(double h, double albedo, StepCoef& c) {
-    auto z{0.5 * c_pi - h};
-    auto cosz{std::cos(z)};
+inline void dr_coef(StepCoef& c, double h, double cosz, double albedo) {
     c.c1 = 0.0;
     c.c2 = 0.0;
     c.c3 = 0.0;
     if (c.dhr > c_1e_8) {
+        auto z{0.5 * c_pi - h};
         auto epsilon{1.0 + c.dnr / ((1.0 + 1.041 * std::pow(z, 3)) * c.dhr)};
         auto idx{0};
         for (; idx < 7; ++idx) {
@@ -39,7 +38,7 @@ inline void dr_coef(double h, double albedo, StepCoef& c) {
         }
         auto& arr = FR[idx];
         static constexpr auto m{1 / 1353.0};
-        auto derta{c.dhr * m / (std::sin(h) + 0.15 * std::pow(3.885 + h, -1.253))};
+        auto derta{c.dhr * m / (cosz + 0.15 * std::pow(3.885 + h, -1.253))};
         auto f1{std::max(0.0, std::min(1.0, arr[0] + arr[1] * derta + arr[2] * z))};
         auto f2{std::max(0.0, std::min(1.0, arr[3] + arr[4] * derta + arr[5] * z))};
         c.c1 = c.dhr * f2;
@@ -51,19 +50,19 @@ inline void dr_coef(double h, double albedo, StepCoef& c) {
 }
 
 inline double diffuse_(double h, const StepCoef& c, double cos_i, 
-    double gdot, double sinsita, double rdome, double rhorizon, double sr) {
+    double cos_g, double sin_g, double rdome, double rhorizon, double sr) {
     if (h <= 0.0 || c.dhr < c_1e_8) return 0.0;
-    auto dr{c.c1 * sinsita * rhorizon + c.c2 * (1 + gdot) * rdome + c.c3 * cos_i * (1 - sr)};
+    auto dr{c.c1 * sin_g * rhorizon + c.c2 * (1 + cos_g) * rdome + c.c3 * cos_i * (1 - sr)};
     return dr;
 }
 
-inline double ground_reflect_(double h, double c4, double gdot, double rdomeg) {
+inline double ground_reflect_(double h, double c4, double cos_g, double rdomeg) {
     if (h <= 0.0) return 0.0;
-    auto grr{(0.5 * (1 - gdot)) * c4 * rdomeg};
+    auto grr{(0.5 * (1 - cos_g)) * c4 * rdomeg};
     return grr;
 }
 
-inline double reflection_factor(double rdome, double rdomeg, double gdot) {
-    return 1 - rdome * (1 + gdot) / 2.0 - rdomeg * (1 - gdot) / 2.0;
+inline double reflection_factor(double rdome, double rdomeg, double cos_g) {
+    return 1 - rdome * (1 + cos_g) / 2.0 - rdomeg * (1 - cos_g) / 2.0;
 }
 #endif

@@ -11,6 +11,10 @@ struct BuildingAreas {
     int id{};
     std::string name{};
     std::array<double, 10> as{};
+
+    inline bool operator < (const BuildingAreas& rhs) const {
+        return id < rhs.id;
+    }
 };
 using BAreas = std::vector<BuildingAreas>;
 
@@ -23,29 +27,24 @@ using MeshRadiations = std::map<int, std::vector<std::vector<double>>>;
 MeshRadiations meshRads;
 std::vector<int> meshIds;
 
-struct NeighborReflectSrfs { //neighbor_reflect_radiation
+struct NbhdReflectSrfs { //neighborhood_reflect_radiation
     std::map<int, std::tuple<double, double>> nfs; //uid,h,area
     double tarea{};
 };
-struct NeighborReflectBuilding {
+struct NbhdReflectBuilding {
     std::set<int> nfs;
     double tarea{};
 };
-std::map<int, NeighborReflectSrfs> srf_nrfs; //wall neighbour
-std::map<int, NeighborReflectBuilding> building_nrfs; //roof neighbour
+std::map<int, NbhdReflectSrfs> srf_nrfs; //wall neighborhood
+std::map<int, NbhdReflectBuilding> building_nrfs; //roof neighborhood
 using KdVs = std::map<int, double>;
 
 static constexpr int uniqueKey{10000};
-int uniqueId(int pid, int sid) {
+inline int uniqueId(int pid, int sid) {
     return pid * uniqueKey + sid;
 }
 
-void phd_srf(int uid, int& pid, int& sid) {
-    pid = uid / uniqueKey;
-    sid = uid % uniqueKey;
-}
-
-inline void srf_neighbors(const Surface& srf, int pid, double tansh, const GPhds& phds) {
+inline void srf_neighborhoods(const Surface& srf, int pid, double tansh, const GPhds& phds) {
     if (srf.id == c_roof_Id) return;
     auto uid{uniqueId(pid, srf.id)};
     auto& fns = srf_nrfs[uid];
@@ -56,15 +55,9 @@ inline void srf_neighbors(const Surface& srf, int pid, double tansh, const GPhds
             if (nsrf.id == c_roof_Id && srf._h <= nsrf._h) continue;
             auto threshold{nsrf._h / tansh};
             ep3 dir_v{srf._center - nsrf._center};
-            auto dis{dir_v.norm()};
-            if (dis > threshold) continue;
-
-            auto ndot{srf._normi.dot(nsrf._normi)};
-            if (ndot >= 0.0) continue;
-
-            auto ddot{srf._normi.dot(dir_v)};
-            if (ddot >= 0.0) continue;
-
+            if (threshold < dir_v.norm()) continue;
+            if (srf._normi.dot(nsrf._normi) >= 0.0) continue;
+            if (srf._normi.dot(dir_v) >= 0.0) continue;
             auto nuid{uniqueId(phd._id, nsrf.id)};
             auto it = fns.nfs.emplace(nuid, std::make_tuple(nsrf._h, nsrf._area));
             if (it.second) {
@@ -74,7 +67,7 @@ inline void srf_neighbors(const Surface& srf, int pid, double tansh, const GPhds
     }
 }
 
-inline void roof_neighbors(const GPhds& phds, const OneMany& b2pids) {
+inline void roof_neighborhoods(const GPhds& phds, const OneMany& b2pids) {
     for (const auto& [bid, pids] : b2pids) {
         auto& bns = building_nrfs[bid];
         for (auto pid : pids) {
@@ -109,20 +102,19 @@ void initPhdSrfs(GPhds& phds, const WWRs& wwrs, const OneMany& b2pids, double ph
                 it->second.set(srf.window, srf._dir);
                 srf.wpoly(phd.floor);
             }
-            srf_neighbors(srf, phd._id, tansh, phds);
+            srf_neighborhoods(srf, phd._id, tansh, phds);
         }
     }
-    roof_neighbors(phds, b2pids);
+    roof_neighborhoods(phds, b2pids);
 }
 
 inline void refRadiation(const Surface& srf, int uid, const Materials& m, KdVs& nrrs) {
-    auto nrr{0.0};
+    auto& nrr = nrrs[uid];
     if (srf.id == c_roof_Id) {
-        nrr = srf._area * srf._tr * m.r_roof;
+        nrr = srf._area * srf._sr * m.r_roof;
     } else {
-        nrr = (srf._opaque * srf._tr * m.r_wall + srf.window.area * srf._wtr * (1 - m.G_win));
+        nrr = (srf._opaque * srf._sr * m.r_wall + srf.window.area * srf._wsr * (1 - m.G_win));
     }
-    nrrs[uid] = nrr;
 }
 
 inline double nrefRadiation(int uid, const KdVs& nrrs, bool roof) {
@@ -133,7 +125,6 @@ inline double nrefRadiation(int uid, const KdVs& nrrs, bool roof) {
         if (nit == nrrs.end()) return;
         tnrr += nit->second;
     };
-
     if (roof) {
         const auto it = building_nrfs.find(uid);
         if (it != building_nrfs.end()) {
@@ -164,52 +155,50 @@ inline void correct_cosi(double& cosi, double sh) {
     }
 }
 
-bool srfRadiation(const Surface& srf, KdVs& nrrs, int phdId, const Solar& solar, 
+bool srfRadiation(const Surface& srf, KdVs& nrrs, int phdId, double sh,  
     const StepCoef& sc, const Materials& m) {
-    if (srf.id <= c_virtual_srf) return false;
-    if (srf._dir < 0) return false;
-    auto cosi{solar.v.dot(srf._normi)};
-    correct_cosi(cosi, solar.h);
+    if (srf.id <= c_virtual_srf || srf._dir < 0) return false;
+    auto cosi{srf._cos_s};
+    correct_cosi(cosi, sh);
     auto wall_dr{cosi * sc.dnr * (1 - srf._sr)};
-    auto dr{diffuse_(solar.h, sc, cosi, srf._gdot, srf._sinsita, 
+    auto dr{diffuse_(sh, sc, cosi, srf._normi(2), srf._sin_g, 
         srf._dr.rdome, srf._dr.rhorizon, srf._sr)};
-    auto grr{ground_reflect_(solar.h, sc.c4, srf._gdot, srf._dr.rdomeG)};
-    srf._tr = wall_dr + dr + grr;
-
-    srf._wtr = 0.0;
+    auto grr{ground_reflect_(sh, sc.c4, srf._normi(2), srf._dr.rdomeG)};
+    srf._sr = wall_dr + dr + grr;
+    auto wtr{0.0};
     if (srf.window.exist()) {
         auto window_dr{cosi * sc.dnr * (1 - srf._wsr)};
-        auto dr1{diffuse_(solar.h, sc, cosi, srf._gdot, srf._sinsita, 
+        auto dr1{diffuse_(sh, sc, cosi, srf._normi(2), srf._sin_g, 
             srf._dr.rdome, srf._dr.rhorizon, srf._wsr)};
-        srf._wtr = window_dr + dr1 + grr;
+        wtr = window_dr + dr1 + grr;
     }
+    srf._wsr = wtr;
     auto uid{uniqueId(phdId, srf.id)};
     refRadiation(srf, uid, m, nrrs);
     return true;
 }
 
 bool srfAllRadiation(const Surface& srf, const KdVs& nrrs, int phdId, int buildId, int step, double avgrr) {
-    if (srf.id <= c_virtual_srf) return false;
-    if (srf._dir < 0) return false;
+    if (srf.id <= c_virtual_srf || srf._dir < 0) return false;
     auto uid{uniqueId(phdId, srf.id)};
     if (srf.id != c_roof_Id) {
         avgrr = nrefRadiation(uid, nrrs, false);
     }
-    auto factor{reflection_factor(srf._dr.rdome, srf._dr.rdomeG, srf._gdot)};
+    auto factor{reflection_factor(srf._dr.rdome, srf._dr.rdomeG, srf._normi(2))};
     auto nrr{factor * avgrr};
     auto& rs = radRes[buildId];
     auto& r = rs[step];
     if (srf.id == c_roof_Id) {
-        r[8] += srf._opaque * (srf._tr + nrr) * 1e-3;
-        r[9] += srf.window.area * (srf._wtr + nrr) * 1e-3;
+        r[8] += srf._opaque * (srf._sr + nrr) * 1e-3;
+        r[9] += srf.window.area * (srf._wsr + nrr) * 1e-3;
     } else {
-        r[srf._dir] += srf._opaque * (srf._tr + nrr) * 1e-3;;
-        r[srf._dir + 4] += srf.window.area * (srf._wtr + nrr) * 1e-3;
+        r[srf._dir] += srf._opaque * (srf._sr + nrr) * 1e-3;;
+        r[srf._dir + 4] += srf.window.area * (srf._wsr + nrr) * 1e-3;
     }
     return true;
 }
 
-void phdsRadiation(const GPhds& phds, KdVs& nrrs, const Solar& solar, int step, const StepCoef& sc, bool calc) {
+void phdsRadiation(const GPhds& phds, KdVs& nrrs, const Solar& solar, const StepCoef& sc, int step, bool calc) {
     for (const auto& phd : phds) {
         auto mit = bms.find(phd._buildId);
         if (mit == bms.end()) {
@@ -217,7 +206,7 @@ void phdsRadiation(const GPhds& phds, KdVs& nrrs, const Solar& solar, int step, 
             if (mit == bms.end()) continue;
         }
         for (auto& [_, srf] : phd.srfs) {
-            srfRadiation(srf, nrrs, phd._id, solar, sc, mit->second);
+            srfRadiation(srf, nrrs, phd._id, solar.h, sc, mit->second);
         }
     }
     if (!calc) return;
@@ -236,21 +225,20 @@ void phdsRadiation(const GPhds& phds, KdVs& nrrs, const Solar& solar, int step, 
 }
 
 void meshsRadiation(const GPhds& phds, SrfMeshs& smeshs, KdVs& nrrs, 
-    const Solar& solar, int step, const StepCoef& sc, bool save) {
-    phdsRadiation(phds, nrrs, solar, step, sc, smeshs.empty());
+    const Solar& solar, const StepCoef& sc, int step, bool save) {
+    phdsRadiation(phds, nrrs, solar, sc, step, smeshs.empty());
     auto pos{(solar._step - solar._start) % 24};
     auto clear{solar._step == solar._start};
     for (auto& [buildId, meshs] : smeshs) {
         auto& rs = meshRads[buildId];
         for (auto& mesh : meshs) {
             mesh.shadow_(pos, clear, save);
-            auto cosi{solar.v.dot(mesh.srf->_normi)};
+            auto cosi{mesh.srf->_cos_s};
             correct_cosi(cosi, solar.h);
             auto srf_dr{cosi * sc.dnr * (1.0 - mesh.m.sr)};
-            auto dr{diffuse_(solar.h, sc, cosi, mesh.srf->_gdot, 
-                mesh.srf->_sinsita, mesh._dr.rdome, mesh._dr.rhorizon, mesh.m.sr)};
-            auto grr{ground_reflect_(solar.h, sc.c4, mesh.srf->_gdot, mesh._dr.rdomeG)};
-
+            auto dr{diffuse_(solar.h, sc, cosi, mesh.srf->_normi(2), 
+                mesh.srf->_sin_g, mesh._dr.rdome, mesh._dr.rhorizon, mesh.m.sr)};
+            auto grr{ground_reflect_(solar.h, sc.c4, mesh.srf->_normi(2), mesh._dr.rdomeG)};
             auto avgrr{0.0};
             if (mesh.srf->id == c_roof_Id) {
                 avgrr = nrefRadiation(buildId, nrrs, true);
@@ -258,7 +246,7 @@ void meshsRadiation(const GPhds& phds, SrfMeshs& smeshs, KdVs& nrrs,
                 auto uid{uniqueId(mesh.phd, mesh.srf->id)};
                 avgrr = nrefRadiation(uid, nrrs, false);
             }
-            auto factor{reflection_factor(mesh._dr.rdome, mesh._dr.rdomeG, mesh.srf->_gdot)};
+            auto factor{reflection_factor(mesh._dr.rdome, mesh._dr.rdomeG, mesh.srf->_normi(2))};
             auto nrr{factor * avgrr};
             auto t{srf_dr + dr + grr + nrr};
             rs[step].emplace_back(t);
@@ -266,18 +254,12 @@ void meshsRadiation(const GPhds& phds, SrfMeshs& smeshs, KdVs& nrrs,
     } 
 }
 
-inline void td(double& val) {
-    val = std::round(val * 1e3) * 1e-3;
-}
-
 inline double td_(double val) {
-    val = std::round(val * 1e3) * 1e-3;
-    return val;
+    return std::round(val * 1e3) * 1e-3;
 }
 
 inline float tf_(double val) {
-    float v = static_cast<float>(std::round(val * 1e3) * 1e-3);
-    return v;
+    return static_cast<float>(std::round(val * 1e2) * 1e-2);
 }
 
 void buildingArea(BAreas& bas, const GPhds& phds) {
@@ -303,8 +285,7 @@ void buildingArea(BAreas& bas, const GPhds& phds) {
                 add();
             }
             for (auto& [_, srf] : phd.srfs) {
-                if (srf.id <= c_virtual_srf) continue;
-                if (srf._dir < 0) continue;
+                if (srf.id <= c_virtual_srf || srf._dir < 0) continue;
                 if (srf.id == c_roof_Id) {
                     as[8] += srf._opaque;
                     as[9] += srf.window.area;
@@ -324,13 +305,11 @@ void buildingArea(BAreas& bas, const GPhds& phds) {
     }
 }
 
-void writePhdsRadiation(const std::filesystem::path& fileDir, const BAreas& bas, 
-    const Weathers& ws, size_t hc) {
+void writePhdsRadiation(const std::filesystem::path& fileDir, const BAreas& bas, const Weathers& ws, bool mt) {
     std::filesystem::create_directory(fileDir);
-    auto fun = [&](int th, int begin, int end) {
-        th = begin;
-        for (; th < end; ++th) {
-            auto& ba = bas[th];
+    auto fun = [&](int begin, int end) {
+        for (int i = begin; i < end; ++i) {
+            auto& ba = bas[i];
             auto name{std::format(R_name, ba.name)};
             auto file{fileDir / name};
             std::ofstream ofs(file);
@@ -348,40 +327,27 @@ void writePhdsRadiation(const std::filesystem::path& fileDir, const BAreas& bas,
             ofs << std::endl;  
         }
     };
-    concurrencyF(fun, bas.size(), hc);
+    if (mt) {
+        asyncF(fun, bas.size());
+    } else {
+        fun(0, static_cast<int>(bas.size()));
+    }
 }
 
 void writeMeshsRadiation(const std::filesystem::path& fileDir, const SrfMeshs& meshs, 
-    const BAreas& bas, const Weathers& ws, size_t hc) {
+    const BAreas& bas, const Weathers& ws, bool mt) {
     static constexpr std::string_view mname{"{}_insolation_Whm2.feather"};
     std::filesystem::create_directory(fileDir);
-    auto findBa = [&](int id) {
-        int left{};
-        int right{static_cast<int>(bas.size())};
-        while (left <= right) {
-            auto mid{(left + right) / 2};
-            auto bid{bas[mid].id};
-            if (bid == id) {
-                return mid;
-            } else if (bid < id) {
-                left = mid + 1;
-            } else {
-                right = mid - 1;
-            }
-        }
-        return -1;
-    };
-
-
-    auto fun = [&](int th, int begin, int end) {
-        th = begin;
-        for (; th < end; ++th) {
-            auto id = meshIds[th];
+    auto fun = [&](int begin, int end) {
+        BuildingAreas cba{};
+        for (int k = begin; k < end; ++k) {
+            auto id = meshIds[k];
             const auto it = meshs.find(id);
             if (it == meshs.end() || it->second.empty()) continue;
-            auto bidx{findBa(id)};
-            if (bidx < 0) continue;
-            auto& ba = bas[bidx];
+            cba.id = id;
+            auto bait{std::lower_bound(bas.begin(), bas.end(), cba)};
+            if (bait == bas.end()) continue;
+            auto& ba{*bait};
             auto name{std::format(R_name, ba.name)};
             auto file{fileDir / name};
             std::ofstream ofs(file);
@@ -407,13 +373,10 @@ void writeMeshsRadiation(const std::filesystem::path& fileDir, const SrfMeshs& m
                     auto& mesh = it->second[j];
                     a[mesh.dir] += rsuj * mesh.m.area;
                 }
-                for (auto& val : a) {
-                    td(val);
-                }
                 auto& w = ws[i];
-                line = std::format(R_row, w.date, a[8], a[0], a[1], a[2], a[3], a[4], 
-                    a[5], a[6], a[7], ba.as[8], ba.as[0], ba.as[1], ba.as[2], ba.as[3], 
-                    ba.as[4], ba.as[5], ba.as[6], ba.as[7]
+                line = std::format(R_row, w.date, td_(a[8]), td_(a[0]), td_(a[1]), td_(a[2]), 
+                    td_(a[3]), td_(a[4]), td_(a[5]), td_(a[6]), td_(a[7]), ba.as[8], ba.as[0], 
+                    ba.as[1], ba.as[2], ba.as[3], ba.as[4], ba.as[5], ba.as[6], ba.as[7]
                 );
                 ofs << line;
             }
@@ -435,11 +398,14 @@ void writeMeshsRadiation(const std::filesystem::path& fileDir, const SrfMeshs& m
                 ARROW_RETURN_NOT_OK(cfs->Close());
                 return arrow::Status::OK();
             };
-            auto st = writeF();
-            st.ok();
+            writeF().ok();
         }
     };
-    concurrencyF(fun, meshIds.size(), hc);
+    if (mt) {
+        asyncF(fun, meshIds.size());
+    } else {
+        fun(0, static_cast<int>(meshIds.size()));
+    }
 }
 
 inline void initThreadMeshs(SrfMeshs& tms, const GPhds& tps) {
@@ -466,6 +432,7 @@ int main(int argc, char** argv) {
     std::filesystem::path file{req};
     if (!std::filesystem::exists(file)) {
         std::cout << "CRAX req err " << req << std::endl;
+        return 1;
     }
     Location _lo;
     Weathers _ws;
@@ -475,52 +442,51 @@ int main(int argc, char** argv) {
     auto fileDir{file.parent_path()};
     auto albedo{0.0};
     size_t size{};
-    size_t hc{std::thread::hardware_concurrency()};
     {
         std::ifstream ifs(file);
         json jconf = json::parse(ifs);
-        auto jval_fun = [&jconf](auto& val, std::string_view key) {
+        auto jval = [&jconf](auto& val, std::string_view key) {
             if (jconf.contains(key)) {
                 val = jconf[key];
             }
         };
         albedo = jconf["albedo"];
-
         std::string sdir = jconf["CRAX_input_folder"];
         fileDir = sdir;
         std::string wconf{"weather.epw"};
-        jval_fun(wconf, "weather");
+        jval(wconf, "weather");
         auto wfile{fileDir / wconf};
-        if (!sRC.readWeather(wfile, _lo, _ws)) {
+        if (!g_config.readWeather(wfile, _lo, _ws)) {
             std::cout << "readWeather err " << wfile << std::endl;
             return 1;
         }
         size = _ws.size();
 
+        jval(cset.mt, "multiprocessing");
         cset.day = jconf["update-shadow-day"];
         const json& jbs = jconf["buildings"];
         for (auto& b : jbs) {
             cset.nameIds.emplace(std::string(b), 0);
         }
         std::string zoneGeo{"zone_building_geometry.csv"};
-        jval_fun(zoneGeo, "zone-geo");
+        jval(zoneGeo, "zone-geo");
         auto geo1{fileDir / zoneGeo};
         double sdis1{};
-        jval_fun(sdis1, "zone-geometry");
+        jval(sdis1, "zone-geometry");
         std::string surrGeo{"surroundings_building_geometry.csv"};
-        jval_fun(surrGeo, "surrounding-geo");
+        jval(surrGeo, "surrounding-geo");
         double sdis2{};
-        jval_fun(sdis2, "surrounding-geometry");
+        jval(sdis2, "surrounding-geometry");
         auto geo2{fileDir / surrGeo};
         bool neglect = jconf["neglect-adjacent-buildings"];
         std::vector<GeoConf> confs;
         WWRs wwrs;
         OneMany b2pids;
-        if (!sRC.readGeoData(geo1, geo2, confs, cset, wwrs, sdis1, sdis2, neglect)) {
+        if (!g_config.readGeoData(geo1, geo2, confs, cset, wwrs, sdis1, sdis2, neglect)) {
             std::cout << "readGeoData err" << std::endl;
             return 1;
         }
-        sRC.confs2Phds(confs, phds, b2pids);
+        g_config.confs2Phds(confs, phds, b2pids);
         for (auto id : cset.ids) {
             const auto& conf = confs[id];
             auto& info = bflags[id];
@@ -537,12 +503,12 @@ int main(int argc, char** argv) {
             ++id;
         }
         std::string mat{"building_materials.csv"};
-        jval_fun(mat, "materials");
+        jval(mat, "materials");
         auto matFile{fileDir / mat};
-        sRC.readMaterials(matFile, bnameIds, bms);
+        g_config.readMaterials(matFile, bnameIds, bms);
 
         auto sh{15.0};
-        jval_fun(sh, "neighbor-filter-altitude-angle");
+        jval(sh, "neighbor-filter-altitude-angle");
         initPhdSrfs(phds, wwrs, b2pids, sh);
     
         std::string output = jconf["CRAX_result_folder"];
@@ -552,18 +518,18 @@ int main(int argc, char** argv) {
             if (input) {
                 auto meshDir{std::filesystem::path{output}};
                 auto pnorm{c_1e_2};
-                jval_fun(pnorm, "pnorm");
+                jval(pnorm, "pnorm");
                 auto pinner{1e-3};
-                jval_fun(pinner, "pinner");
-                sRC.readMeshs(meshs, meshDir, phds, b2pids, cset, pnorm, pinner);
+                jval(pinner, "pinner");
+                g_config.readMeshs(meshs, meshDir, phds, b2pids, cset, pnorm, pinner);
             } else {
                 auto droof{1.0};
-                jval_fun(droof, "roof-grid");
+                jval(droof, "roof-grid");
                 auto dwall{1.0};
-                jval_fun(dwall, "walls-grid");
+                jval(dwall, "walls-grid");
                 base_generateSrfMeshs(meshs, phds, b2pids, cset, droof, dwall);
                 fileDir = output;
-                sRC.writeMeshs(meshs, fileDir, bflags);
+                g_config.writeMeshs(meshs, fileDir, bflags);
             }
             for (const auto& [buildId, mesh] : meshs) {
                 meshIds.emplace_back(buildId);
@@ -574,45 +540,47 @@ int main(int argc, char** argv) {
             }
         }
         bool alone{};
-        jval_fun(alone, "mesh-clipping-view-factor");
-        sShdg.diffuse(phds, meshs, cset, alone);
-        fileDir = output;     
+        jval(alone, "mesh-clipping-view-factor");
+        g_shadow.diffuse(phds, meshs, cset, alone);
+        fileDir = output;
     }
     {
-        std::vector<GPhds> thPhds;
-        std::vector<SrfMeshs> thSmeshs;
-        thPhds.resize(hc, phds);
-        thSmeshs.resize(hc, meshs);
-        auto fun = [&](int th, int begin, int end) {
+        auto claculate = [&](GPhds& tps, SrfMeshs& tms, int begin, int end) {
             Solar solar;
             solar.init(_lo.latitude, _lo.longitude, _lo.ls, begin);
-            auto& tps = thPhds[th];
-            auto& tms = thSmeshs[th];
-            initThreadMeshs(tms, tps);
             KdVs nrrs;
             StepCoef coef{};
             for (int step = begin; step < end; ++step) {
                 auto day{step / 24 + 1};
                 auto hour{(step + 1) % 24 - 0.5};
                 solar.sv(day, hour, step);
-                sShdg.calc_(solar, tps, cset);
+                g_shadow.calculate(tps, solar, cset);
                 const auto& w = _ws[step];
                 coef.dhr = w.dhr;
                 coef.dnr = w.dnr;
-                dr_coef(solar.h, albedo, coef);
-                meshsRadiation(tps, tms, nrrs, solar, step, coef, cset.day > 1);
+                dr_coef(coef, solar.h, -solar.v(2), albedo);
+                meshsRadiation(tps, tms, nrrs, solar, coef, step, cset.day > 1);
             }
         };
-        concurrencyF(fun, size, hc);
+        if (cset.mt) {
+            auto fun = [&](int begin, int end) {
+                auto tps{phds};
+                auto tms{meshs};
+                initThreadMeshs(tms, tps);
+                claculate(tps, tms, begin, end);
+            };
+            asyncF(fun, size);
+        } else {
+            claculate(phds, meshs, 0, static_cast<int>(size));
+        }
         rt.view("model running time: ");
     }
-
     BAreas bas;
     buildingArea(bas, phds);
     if (meshs.empty()) {
-        writePhdsRadiation(fileDir, bas, _ws, hc);
+        writePhdsRadiation(fileDir, bas, _ws, cset.mt);
     } else {
-        writeMeshsRadiation(fileDir, meshs, bas, _ws, hc);
+        writeMeshsRadiation(fileDir, meshs, bas, _ws, cset.mt);
     }
     rt.view("file writing time: ");
     return 0;
