@@ -1,6 +1,6 @@
 #include "env_.h"
 #include "config.h"
-void initPhdSrfs(GPhds& phds, const BFlags& bflags, const WWRs& wwrs) {
+void init(GPhds& phds, const BFlags& bflags, const WWRs& wwrs) {
     for (auto& phd : phds) {
         auto pit = bflags.find(phd._buildId);
         if (pit == bflags.end()) continue;
@@ -77,11 +77,11 @@ int main(int argc, char** argv) {
     OneMany b2pids;
     {
         std::vector<GeoConf> confs;
-        if (!sRC.readGeoData(geo1, geo2, confs, cset, wwrs, sdis1, sdis2, neglect)) {
+        if (!g_config.readGeoData(geo1, geo2, confs, cset, wwrs, sdis1, sdis2, neglect)) {
             std::cout << "readGeoData err" << std::endl;
             return 1;
         }
-        sRC.confs2Phds(confs, phds, b2pids);
+        g_config.confs2Phds(confs, phds, b2pids);
         for (auto id : cset.ids) {
             const auto& conf = confs[id];
             auto& info = bflags[id];
@@ -90,7 +90,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    initPhdSrfs(phds, bflags, wwrs);
+    init(phds, bflags, wwrs);
 
     SrfMeshs meshs;
     std::string output = jconf["CRAX_result_folder"];
@@ -101,7 +101,7 @@ int main(int argc, char** argv) {
     base_generateSrfMeshs(meshs, phds, b2pids, cset, droof, dwall);
 
     fileDir = output;
-    sRC.writeMeshs(meshs, fileDir, bflags);
+    g_config.writeMeshs(meshs, fileDir, bflags);
     rt.view("running time: ");
     return 0;
 }

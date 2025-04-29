@@ -2,6 +2,7 @@
 #ifndef _BASE_H_
 #define _BASE_H_
 #include "env_.h"
+#include <bitset>
 inline double deg2rad(double deg) {
     static constexpr auto c_d2r{c_pi / 180.0};
     return deg * c_d2r;
@@ -16,9 +17,7 @@ inline void base_correct_sr(double& sr) {
 }
 
 inline double base_td(double val) {
-    //val = std::stod(std::format("{:.{}f}", val, n));
-    val = std::round(val * 1e4) * 1e-4;
-    return val;
+    return std::round(val * 1e4) * 1e-4;
 }
 
 struct Solar {
@@ -36,23 +35,29 @@ struct Solar {
     int _start{};
     int _step{};
 
-    Solar() = default;
-    void init(double lat, double lon, double ls, int start = 0);
+    inline void init(double lat, double lon, double ls, int start = 0) {
+        lat = deg2rad(lat);
+        sinlat = std::sin(lat);
+        coslat = std::cos(lat);
+        longitude = lon - ls - 180.0;
+        _start = start; 
+    }
     void sv(int d, double hour, int step);
 };
 
 using NameIds = std::map<std::string, int>;
 struct ShadowSet {
     NameIds nameIds;
-    std::set<int> ids;
+    std::vector<int> ids;
     int day{};
     bool all{true};
     bool mode{true};
+    bool mt{true};
     mutable bool diffuse{};
-    mutable int ctype{1}; //0(no calc srf) 1(call and separate) 2(call as one wall)
+    mutable int ctype{1}; //0(no calc srf) 1(calc and separate) 2(calc as one wall)
 
     inline bool should(int id) const {
-        if (!all && ids.find(id) == ids.end()) return false;
+        if (!all && !std::binary_search(ids.begin(), ids.end(), id)) return false;
         return true;
     }
 
@@ -133,17 +138,14 @@ struct Surface {
     double _h{};
     double _area{};
     double _opaque{};
-    double _gdot{};
-    double _sinsita{};
+    double _sin_g{};
     bool _gcalc{};
 
-    int _shdg{};
     bool _scalc{};
-    double _sr{};
-    double _wsr{};
-
-    mutable double _tr{};
-    mutable double _wtr{};
+    int _shdg{};
+    double _cos_s{};
+    mutable double _sr{}; //shadow ratio -> (mutable) wall total radiation 
+    mutable double _wsr{};
 
     epts _pts;
     std::vector<epts> inners;
@@ -164,24 +166,21 @@ struct Surface {
 
     void reset();
     void setsr(double sr, double wsr, bool save);
-    bool shadowInit(const ep3& sv, bool save);
+    void shadowInit(double sh, const ep3& sv, bool save, bool clear);
 
     double lightArea() const;
-    void light2Json(json& j, bool all = false) const;
 
-    bool calcsr(int pos);
-    inline void clearsr() {
-        daysrs.clear();
-    }
+    bool calcsr(const ep3& sv, int pos);
     void draw(double du, double dv);
     void draw(Meshs& meshs_, double du, double dv) const;
 private:
     bool equation(const ep3& c);
     void rotation();
-    void setPoly();
-    void setDir();
+    void polygon();
+    void direction();
 };
 using Surfaces = std::map<int, Surface>;
+using NBHDs = std::vector<const Surface*>;
 
 struct Polyhedron {
     int _id{};
@@ -191,7 +190,7 @@ struct Polyhedron {
     ebbox box;
     ep3 _center;
     double _dis{};
-    std::vector<const Surface*> neighbours;
+    NBHDs nbhds;
     bool init(int id, int buildId);
 };
 using GPhds = std::vector<Polyhedron>;
@@ -202,23 +201,15 @@ struct SrfMesh {
     Mesh m;
     const Surface* srf{};
     DiffuseR _dr{};
-    std::vector<bool> daysrs;
+    std::bitset<24> daysrs;
 
     inline void shadow_(int pos, bool clear, bool save, bool intersect = false) {
         if (srf->_shdg == c_shadow_other_set) {
-            if (pos < 0 || pos >= static_cast<int>(daysrs.size())) {
-                return;
-            }
-            bool s{daysrs[pos]};
-            if (s) {
-                m.sr = 1.0;
-            } else {
-                m.sr = 0.0;
-            }
+            m.sr = daysrs[pos];
             return;
         }
         if (clear && save) {
-            daysrs.clear();
+            daysrs.set();
         }
         auto s{false};
         if (srf->_shdg == c_shadow_full) {
@@ -240,8 +231,8 @@ struct SrfMesh {
                 base_correct_sr(m.sr);
             }
         }
-        if (save) {
-            daysrs.emplace_back(s);
+        if (save && !s) {
+            daysrs.reset(pos);
         }
     }
 };

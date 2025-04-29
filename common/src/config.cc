@@ -1,88 +1,90 @@
 #include "config.h"
 #include "gen_phd.h"
 #include "str_func.h"
-bool ReadConfig::readWeather(const std::filesystem::path& file, Location& lo, Weathers& ws) const {
-    static constexpr std::string_view dateFormat{"{}/{}/{} {}:00:00"};
-    if (!std::filesystem::exists(file)) {
-        return false;
+double stod_s(const std::string& sv) {
+    if (!sv.empty()) {
+        return std::stod(sv);
     }
+    return 0.0;
+}
+
+int stoi_s(const std::string& sv) {
+    if (!sv.empty()) {
+        return std::stoi(sv);
+    }
+    return 0;
+}
+
+
+bool Config::readWeather(const std::filesystem::path& file, Location& lo, Weathers& ws) const {
+    static constexpr std::string_view dateFormat{"{}/{}/{} {}:00:00"};
+    if (!std::filesystem::exists(file)) return false;
     ws.reserve(8784);
     std::ifstream f(file);
     std::string l;
     auto first{true};
     while (std::getline(f, l)) {
         if (sfunc::trimr(l)) continue;
-        std::vector<std::string> us;
-        sfunc::split(us, l, ",");
+        auto&& us = sfunc::split(l, ",");
         if (first) {
-            if (us.size() < 9) {
-                return false;
-            }
-            lo.latitude = std::stod(us[6]);
-            lo.longitude = std::stod(us[7]);
-            lo.ls = std::stod(us[8]) * 15.0;
+            if (us.size() < 9) return false;
+            lo.latitude = stod_s(us[6]);
+            lo.longitude = stod_s(us[7]);
+            lo.ls = stod_s(us[8]) * 15.0;
             sfunc::skip(f, 7);
             first = false;
             continue;
         }
-        if (us.size() < 16) {
-            return false;
-        }
+        if (us.size() < 16) return false;
         Weather w;
-        w.dnr = std::stod(us[14]);
-        w.dhr = std::stod(us[15]);
-        auto y{std::stoi(us[0])};
-        auto m{std::stoi(us[1])};
-        auto d{std::stoi(us[2])};
-        auto h{std::stoi(us[3]) - 1};
+        w.dnr = stod_s(us[14]);
+        w.dhr = stod_s(us[15]);
+        auto y{stoi_s(us[0])};
+        auto m{stoi_s(us[1])};
+        auto d{stoi_s(us[2])};
+        auto h{stoi_s(us[3]) - 1};
         w.date = std::format(dateFormat, y, m, d, h);
-        ws.emplace_back(w);
+        ws.emplace_back(std::move(w));
     }
     auto size = static_cast<int>(ws.size());
     return size == 8760 || size == 8784;
 }
 
-bool ReadConfig::readGeoFile(const std::filesystem::path& file, std::vector<GeoConf>& confs, 
+bool Config::readGeoFile(const std::filesystem::path& file, std::vector<GeoConf>& confs, 
     int& id, ShadowSet& cset, WWRs& wwrs, double sdis, bool zoneGeo) const {
-    if (!std::filesystem::exists(file)) {
-        return !zoneGeo;
-    }
+    if (!std::filesystem::exists(file)) return !zoneGeo;
     std::ifstream f(file);
     std::string l;
     std::getline(f, l);
     while (std::getline(f, l)) {
         if (sfunc::trimr(l)) continue;
-        std::vector<std::string> us;
-        sfunc::split(us, l, "\"");
+        auto&& us = sfunc::split(l, "\"");
         if (!us[0].empty()) {
             us[0].pop_back();
         }
         if (us[0].empty()) continue;
         GeoConf conf{};
-        std::vector<std::string> us2;
-        sfunc::split(us2, us[2], ",");
-        conf.floor = std::stoi(us2[1]);
-        conf.h = std::stod(us2[2]);
-        conf.te = std::stod(us2[3]);
+        auto&& us2 = sfunc::split(us[2], ",");
+        conf.floor = stoi_s(us2[1]);
+        conf.h = stod_s(us2[2]);
+        conf.te = stod_s(us2[3]);
         conf.h += conf.te;
         conf.name = us[0];
         auto it = cset.nameIds.find(conf.name);
         if (zoneGeo && it != cset.nameIds.end()) {
             it->second = id;
-            cset.ids.emplace(id);
+            cset.ids.emplace_back(id);
         }
         if (us.size() > 3) {
-            std::vector<std::string> us3;
-            sfunc::split(us3, us[3], ",");
+            auto&& us3 = sfunc::split(us[3], ",");
             if (us3.size() == 5) {
                 WWRatio& wwr = wwrs[id];
                 for (int i = 0; i < 5; ++i) {
-                    wwr.rs[i] = std::stod(us3[i]);
+                    wwr.rs[i] = stod_s(us3[i]);
                 }
             }
         }
-        std::vector<std::string> us1;
-        sfunc::split(us1, us[1], "), (");
+        auto&& us1 = sfunc::split(us[1], "), (");
         auto size = static_cast<int>(us1.size()) - 1;
         for (int i = 0; i < size; ++i) {
             auto pos = us1[i].find(',');
@@ -91,7 +93,7 @@ bool ReadConfig::readGeoFile(const std::filesystem::path& file, std::vector<GeoC
             if (i == 0) {
                 sx = us1[i].substr(2, pos - 2);
             }
-            conf.poly.outer().emplace_back(bg_point({std::stod(sx), std::stod(sy)}));
+            conf.poly.outer().emplace_back(bg_point({stod_s(sx), stod_s(sy)}));
         }
         if (!boost::geometry::is_valid(conf.poly)) {
             boost::geometry::correct(conf.poly);
@@ -102,13 +104,13 @@ bool ReadConfig::readGeoFile(const std::filesystem::path& file, std::vector<GeoC
             conf.poly.outer().swap(spoly.outer());
         }
         conf.pushSegs();
-        confs.emplace_back(conf);
+        confs.emplace_back(std::move(conf));
         ++id;
     }
     return true; 
 }
 
-bool ReadConfig::readGeoData(const std::filesystem::path& file1, const std::filesystem::path& file2,
+bool Config::readGeoData(const std::filesystem::path& file1, const std::filesystem::path& file2,
     std::vector<GeoConf>& confs, ShadowSet& cset, WWRs& wwrs, double sdis1, double sdis2, bool neglect) const {
     auto id{0};
     if (!readGeoFile(file1, confs, id, cset, wwrs, sdis1, true)) return false;
@@ -118,7 +120,7 @@ bool ReadConfig::readGeoData(const std::filesystem::path& file1, const std::file
     return true;    
 }
 
-bool ReadConfig::confs2Phds(std::vector<GeoConf>& confs, GPhds& phds, OneMany& b2pids) const {
+bool Config::confs2Phds(std::vector<GeoConf>& confs, GPhds& phds, OneMany& b2pids) const {
     std::vector<Intersects> insts;
     auto size{static_cast<int>(confs.size())};
     for (int i = 0; i < size; ++i) {
@@ -187,7 +189,7 @@ bool ReadConfig::confs2Phds(std::vector<GeoConf>& confs, GPhds& phds, OneMany& b
             if (valid) {
                 Polyhedron phd;
                 phd.floor = conf.floor;
-                if (sGP.stretch(phd, vts, sp, segIns, conf.h, conf.te) && phd.init(phdId, id)) {
+                if (g_GP.stretch(phd, vts, sp, segIns, conf.h, conf.te) && phd.init(phdId, id)) {
                     b2pids[id].emplace_back(phdId);
                     phds.emplace_back(std::move(phd));
                     ++phdId;
@@ -205,7 +207,7 @@ bool ReadConfig::confs2Phds(std::vector<GeoConf>& confs, GPhds& phds, OneMany& b
     return true;
 }
 
-bool ReadConfig::readMaterials(const std::filesystem::path& file, 
+bool Config::readMaterials(const std::filesystem::path& file, 
     const NameIds& nameIds, BMaterials& bms) const {
     if (!std::filesystem::exists(file)) return false;
     std::ifstream f(file);
@@ -213,25 +215,23 @@ bool ReadConfig::readMaterials(const std::filesystem::path& file,
     std::getline(f, l);
     while (std::getline(f, l)) {
         if (sfunc::trimr(l)) continue;
-        std::vector<std::string> us;
-        sfunc::split(us, l, ",");
+        auto&& us = sfunc::split(l, ",");
         if (us.size() < 6) continue;
         auto it = nameIds.find(us[0]);
         if (it == nameIds.end()) continue;
         auto& ms = bms[it->second];
-        ms.G_win = std::stod(us[2]);
-        ms.r_roof = std::stod(us[4]);
-        ms.r_wall = std::stod(us[6]);
+        ms.G_win = stod_s(us[2]);
+        ms.r_roof = stod_s(us[4]);
+        ms.r_wall = stod_s(us[6]);
     }
     return true;
 }
 
-int ReadConfig::meshSrf(SrfMesh& mesh, const Surface& srf, const ep3& normi, 
+int Config::meshSrf(SrfMesh& mesh, const Surface& srf, const ep3& normi, 
     const ep3& center, double pnorm, double pinner) const {
     if (srf.id <= c_virtual_srf) return -1;
     if (mesh.dir != srf._dir) return -1;
     if (!e_p_equal(normi, srf._normi, 3, pnorm)) return -1;
-
     auto find{0};
     ep3 p = srf._rmat * center;
     mesh.m.c_rot = bg_point(p(0), p(1));
@@ -261,7 +261,7 @@ int ReadConfig::meshSrf(SrfMesh& mesh, const Surface& srf, const ep3& normi,
     return find;
 }
 
-bool ReadConfig::readMeshs_(std::vector<SrfMesh>& bms, const std::vector<std::string>& us, 
+bool Config::readMeshs_(std::vector<SrfMesh>& bms, const std::vector<std::string>& us, 
     const GPhds& phds, const std::vector<int>& pids, double pnorm, double pinner) const {
     SrfMesh smesh;
     for (int i = 0; i < static_cast<int>(c_orientations.size()); ++i) {
@@ -271,15 +271,14 @@ bool ReadConfig::readMeshs_(std::vector<SrfMesh>& bms, const std::vector<std::st
         }
     }
     ep3 center;
-    center(0) = std::stod(us[5]);
-    center(1) = std::stod(us[6]);
-    center(2) = std::stod(us[7]);
-
+    center(0) = stod_s(us[5]);
+    center(1) = stod_s(us[6]);
+    center(2) = stod_s(us[7]);
     ep3 normi;
-    normi(0) = std::stod(us[8]);
-    normi(1) = std::stod(us[9]);
-    normi(2) = std::stod(us[10]);
-    smesh.m.area = std::stod(us[11]) * 1e-3;
+    normi(0) = stod_s(us[8]);
+    normi(1) = stod_s(us[9]);
+    normi(2) = stod_s(us[10]);
+    smesh.m.area = stod_s(us[11]) * 1e-3;
     auto type{0};
     for (int i = 0; i < static_cast<int>(c_srfType.size()); ++i) {
         if (c_srfType[i] == us[12]) {
@@ -320,14 +319,14 @@ bool ReadConfig::readMeshs_(std::vector<SrfMesh>& bms, const std::vector<std::st
     if (smesh.srf->id == c_roof_Id) {
         smesh.dir = 8;
     }
-    bms.emplace_back(smesh);
+    bms.emplace_back(std::move(smesh));
     return true;
 }
 
-bool ReadConfig::_readMeshs(std::vector<SrfMesh>& bms, const std::vector<std::string>& us, 
+bool Config::_readMeshs(std::vector<SrfMesh>& bms, const std::vector<std::string>& us, 
     const GPhds& phds) const {
-    auto phdId{std::stoi(us[13])};
-    auto sid{std::stoi(us[14])};
+    auto phdId{stoi_s(us[13])};
+    auto sid{stoi_s(us[14])};
     if (phdId < 0 || phdId >= static_cast<int>(phds.size())) return false;
     auto& pit = phds.at(phdId);
     auto sit = pit.srfs.find(sid);
@@ -335,19 +334,14 @@ bool ReadConfig::_readMeshs(std::vector<SrfMesh>& bms, const std::vector<std::st
     SrfMesh smesh;
     smesh.phd = phdId;
     smesh.srf = &(sit->second);
-    for (int i = 0; i < static_cast<int>(c_orientations.size()); ++i) {
-        if (us[2] == c_orientations[i]) {
-            smesh.dir = i;
-            break;
-        }
-    }
+    smesh.dir = smesh.srf->_dir;
     ep3 center;
-    center(0) = std::stod(us[5]);
-    center(1) = std::stod(us[6]);
-    center(2) = std::stod(us[7]);
+    center(0) = stod_s(us[5]);
+    center(1) = stod_s(us[6]);
+    center(2) = stod_s(us[7]);
     ep3 p = sit->second._rmat * center;
     smesh.m.c_rot = bg_point(p(0), p(1));
-    smesh.m.area = std::stod(us[11]) * 1e-3;
+    smesh.m.area = stod_s(us[11]) * 1e-3;
     auto type{0};
     for (int i = 0; i < static_cast<int>(c_srfType.size()); ++i) {
         if (c_srfType[i] == us[12]) {
@@ -359,49 +353,40 @@ bool ReadConfig::_readMeshs(std::vector<SrfMesh>& bms, const std::vector<std::st
     if (smesh.srf->id == c_roof_Id) {
         smesh.dir = 8;
     }
-    std::vector<std::string> pus;
-    sfunc::split(pus, us[15], " ");
+    auto&& pus = sfunc::split(us[15], " ");
     if (pus.size() % 2 == 0) {
         for (int i = 0; i < static_cast<int>(pus.size()); i += 2) {
-            smesh.m.poly.outer().emplace_back(bg_point(std::stod(pus[i]), std::stod(pus[i + 1])));
+            smesh.m.poly.outer().emplace_back(bg_point(stod_s(pus[i]), stod_s(pus[i + 1])));
         }
     }
-    bms.emplace_back(smesh);
+    bms.emplace_back(std::move(smesh));
     return true;
 }
 
-bool ReadConfig::readMeshs(SrfMeshs& meshs, const std::filesystem::path& dir, const GPhds& phds, 
+bool Config::readMeshs(SrfMeshs& meshs, const std::filesystem::path& dir, const GPhds& phds, 
     const OneMany& b2pids, const ShadowSet& cset, double pnorm, double pinner) const {
     std::ranges::for_each(std::filesystem::directory_iterator{dir}, 
         [&](const auto& dir_entry) {
-            if (!dir_entry.is_regular_file()) {
-                return;
-            }
+            if (!dir_entry.is_regular_file()) return;
             auto file{dir_entry.path()};
             auto name{file.filename().string()};
             auto pos{name.find('_')};
-            if (pos == std::string::npos) {
-                return;
-            }
+            if (pos == std::string::npos) return;
             auto nstr{name.substr(pos + 1)};
             if (nstr != "geometry.csv") return;
-
             auto bstr{name.substr(0, pos)};
             auto it = cset.nameIds.find(bstr);
             if (it == cset.nameIds.end()) return;
-
             auto buildId{it->second};
             auto bpit = b2pids.find(buildId);
             if (bpit == b2pids.end()) return;
-
             auto& bms = meshs[buildId];
             std::ifstream f(file);
             std::string l{};
             std::getline(f, l);
             while (std::getline(f, l)) {
                 if (sfunc::trimr(l)) continue;
-                std::vector<std::string> us;
-                sfunc::split(us, l, ",");
+                auto&& us = sfunc::split(l, ",");
                 auto size{static_cast<int>(us.size())};
                 if (size == 13) {
                     readMeshs_(bms, us, phds, bpit->second, pnorm, pinner);
@@ -417,7 +402,7 @@ bool ReadConfig::readMeshs(SrfMeshs& meshs, const std::filesystem::path& dir, co
     return true;   
 }
 
-void ReadConfig::writeMeshs(const SrfMeshs& smeshs, const std::filesystem::path& fdir, const BFlags& flags) const {
+void Config::writeMeshs(const SrfMeshs& smeshs, const std::filesystem::path& fdir, const BFlags& flags) const {
     static constexpr std::string_view title{"BUILDING,SURFACE,orientation,intersection,terrain_elevation,Xcoor,Ycoor,Zcoor,Xdir,Ydir,Zdir,AREA_m2,TYPE,phd,srf,poly\n"};
     static constexpr std::string_view row{"{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n"};
     static constexpr std::string_view meshName{"{}_geometry.csv"}; 

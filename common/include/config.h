@@ -66,7 +66,7 @@ struct BuildingFlag {
 using BFlags = std::map<int, BuildingFlag>;
 using BMaterials = std::map<int, Materials>;
 
-class ReadConfig {
+class Config {
 public:
     bool readWeather(const std::filesystem::path&, Location&, Weathers&) const;
 
@@ -89,5 +89,5 @@ public:
 
     void writeMeshs(const SrfMeshs&, const std::filesystem::path&, const BFlags&) const;
 };
-static const ReadConfig sRC;
+static const Config g_config;
 #endif
