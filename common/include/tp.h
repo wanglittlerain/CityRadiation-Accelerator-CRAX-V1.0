@@ -10,8 +10,6 @@
 #include <condition_variable>
 #include <atomic>
 #include <future>
-#include <functional>
-#include <stdexcept>
 const static size_t _ghc = std::thread::hardware_concurrency();
 class ThreadPool {
 public:
@@ -76,11 +74,11 @@ private:
 	std::atomic<bool> _run{true};
 };
 
-inline void concurrencyF(const auto& fun, size_t size, size_t hc = _ghc) {
+inline void tpF(const auto& fun, size_t size, size_t hc = _ghc) {
 	auto tp{ThreadPool(std::min(size, hc))};
     if (size < hc) {
         for (int th = 0; th < static_cast<int>(size); ++th) {
-            tp.add(fun, th, th + 1);
+            tp.add(fun, th, th, th + 1);
         }
         return;
     }
@@ -92,7 +90,7 @@ inline void concurrencyF(const auto& fun, size_t size, size_t hc = _ghc) {
         if (th == ts) {
             end = static_cast<int>(size);
         }
-        tp.add(fun, begin, end);
+        tp.add(fun, th, begin, end);
     }
 }
 
@@ -106,7 +104,7 @@ inline void asyncF(const auto& fun, size_t size, size_t hc = _ghc) {
 	vfs.reserve(hc);
     if (size < hc) {
         for (int th = 0; th < static_cast<int>(size); ++th) {
-            vfs.emplace_back(reallyAsync(fun, th, th + 1));
+            vfs.emplace_back(reallyAsync(fun, th, th, th + 1));
         }
         return;
     }
@@ -118,7 +116,7 @@ inline void asyncF(const auto& fun, size_t size, size_t hc = _ghc) {
         if (th == ts) {
             end = static_cast<int>(size);
         }
-        vfs.emplace_back(reallyAsync(fun, begin, end));
+        vfs.emplace_back(reallyAsync(fun, th, begin, end));
     }
 }
 #endif

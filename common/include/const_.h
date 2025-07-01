@@ -8,7 +8,9 @@ static constexpr auto c_pi{3.14159265359};
 static constexpr auto c_roof_Id{0};
 static constexpr auto c_virtual_srf{-1};
 static constexpr auto c_declination{2.0 * c_pi / 365.0};
-static constexpr auto c_split_realId{1000};
+static constexpr auto c_phi{6};    // Number of altitude angle steps for sky integration
+static constexpr auto c_theta{24}; // Number of azimuth angle steps for sky integration
+static constexpr size_t c_diffuse_step{c_phi * c_theta};
 
 enum enShadowType : int {
     c_shadow_init,

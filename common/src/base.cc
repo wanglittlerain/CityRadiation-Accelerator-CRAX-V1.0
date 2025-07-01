@@ -1,13 +1,13 @@
 ﻿#include "base.h"
-const static ep3 c_ground(0.0, 0.0, 1.0);
+#include "tp.h"
 int surfaceDir(const ep3& norm) {
-    const static std::array cDir = {
-        ep3(1.0, 0.0, 0.0), ep3(0.0, 1.0, 0.0), 
-        ep3(0.0, -1.0, 0.0), ep3(-1.0, 0.0, 0.0)
-    };//ensw
+    static constexpr std::array<std::array<int, 2>, 4> cDir = {{
+        {0, 1}, {1, 1}, {1, -1}, {0, -1}
+    }};//ensw
     static constexpr auto r2{0.70710678};
     for (int i = 0; i < 4; ++i) {
-        auto d{norm.dot(cDir[i])};
+        auto& arr = cDir[i];
+        auto d{norm(arr[0]) * arr[1]};
         if (d >= r2 && d <= 1.0) {
             return i;
         }
@@ -15,15 +15,10 @@ int surfaceDir(const ep3& norm) {
     return -1;
 }
 
-inline double div_s(double x, double y) {
-    if (y > -c_1e_8 && y < c_1e_8) {
-        return 0.0;
-    }
-    return x / y;
-}
-
-void Solar::sv(int d, double hour, int step) {
+void Solar::sv(int step) {
     _step = step;
+    auto d{step / 24 + 1};
+    auto hour{(step + 1) % 24 - 0.5};
     if (day != d) {
         day = d;
         auto declination{deg2rad(23.45 * std::sin((284.0 + day) * c_declination))};
@@ -43,85 +38,25 @@ void Solar::sv(int d, double hour, int step) {
     if (std::abs(w) > c_1e_8) {
         cosa = div_s(sinh * sinlat - sinD, cosh * coslat);
         azimuth = std::acos(cosa);
-        if (w < 0) {
+        if (w < 0.0) {
             azimuth *= -1.0;
         }
     }
     v << cosh * std::sin(azimuth), cosh * cosa, -sinh;
 }
 
-void base_gen_grids(Polys& grids, const bg_polygon& poly, double du, double dv) {
-    bg_box box;
-    boost::geometry::envelope(poly, box);
-    auto umin{box.min_corner().x()};
-    auto vmin{box.min_corner().y()};
-    auto umax{box.max_corner().x()};
-    auto vmax{box.max_corner().y()};
-    auto u_div{static_cast<int>(std::ceil((umax - umin) / du))};
-    auto v_div{static_cast<int>(std::ceil((vmax - vmin) / dv))};
-    grids.reserve(u_div * v_div);
-    for (int i = 0; i < u_div; ++i) {
-        auto u1{umin + i * du};
-        auto u2{u1 + du};
-        for (int j = 0; j < v_div; ++j) {
-            auto v1{vmin + j * dv};
-            auto v2{v1 + dv};
-            bg_polygon mp;
-            mp.outer().emplace_back(u1, v1);
-            mp.outer().emplace_back(u2, v1);
-            mp.outer().emplace_back(u2, v2);
-            mp.outer().emplace_back(u1, v2);
-            grids.emplace_back(std::move(mp));
-        }
-    }
-}
-
-void base_gen_meshs(Meshs& meshs, const bg_polygon& poly, double du, double dv, bool wall) {
-    Polys grids;
-    base_gen_grids(grids, poly, du, dv);
-    for (const auto& grid : grids) {
-        Polys outs;
-        if (!boost::geometry::intersection(poly, grid, outs) || outs.empty()) continue;
-        for (auto& out : outs) {
-            if (!boost::geometry::is_valid(out)) {
-                boost::geometry::correct(out);
-            }
-            Mesh mesh;
-            std::swap(mesh.poly, out);
-            mesh.area = boost::geometry::area(mesh.poly);
-            boost::geometry::centroid(mesh.poly, mesh.c_rot);
-            //mesh.c = mat_inv * ep3(mesh.c_rot.x(), mesh.c_rot.y(), rz);
-            mesh.wall = wall;
-            meshs.emplace_back(std::move(mesh));
-        }
-    }    
-}
-
 bool Surface::init(const ep3& center) {
-    if (id <= c_virtual_srf || _gcalc) return true;
-    if (!equation(center)) {
-        std::cout << "init equation error " << id << std::endl; 
-        return false;
-    }
+    if (_gcalc) return true;
+    if (!equation(center)) return false;
     rotation();
     polygon();
-    direction();
+    if (!direction()) return false;
     _gcalc = true;
     return true;
 }
 
 bool Surface::equation(const ep3& c) {
-    auto get_norm = [&](bool reverse = false) {
-        auto size{static_cast<int>(_pts.size())};
-        if (size < 3) return -1;
-        auto i0{0};
-        auto i1{1};
-        auto i2{2};
-        if (reverse) {
-            i0 = size - 1;
-            i1 = size - 2;
-            i2 = size - 3;
-        }
+    auto normv = [&](int i0 = 0, int i1 = 1, int i2 = 2) {
         ep3 p10{_pts[i1] - _pts[i0]};
         ep3 p20{_pts[i2] - _pts[i0]};
         ep3 _norm = p10.cross(p20);
@@ -135,9 +70,12 @@ bool Surface::equation(const ep3& c) {
         if (_normi.norm() < c_5e_2) return -1;
         return ret;
     };
-    auto ret{get_norm()};
-    if (ret < 0) {
-        ret = get_norm(true);
+
+    auto size{static_cast<int>(_pts.size())};
+    if (size < 3) return false;
+    auto ret{normv()};
+    if (ret < 0 && size > 3) {
+        ret = normv(size - 3, size - 2, size - 1);
         if (ret < 0) return false;
     }
     if (ret == 1) {
@@ -148,26 +86,30 @@ bool Surface::equation(const ep3& c) {
 }
 
 void Surface::rotation() {
+    const static ep3 c_ground(0.0, 0.0, 1.0);
     ep3 rotAxis{_normi.cross(c_ground)};
     _sin_g = rotAxis.norm();
     if (_sin_g < c_1e_8) {
         _rmat = Eigen::Matrix3d::Identity();
-        _rmat_inv = Eigen::Matrix3d::Identity();
         return;
     }
     rotAxis.normalize();
     auto angle{std::acos(_normi(2))};
     Eigen::AngleAxisd raa(angle, rotAxis);
     _rmat = raa.matrix();
-    _rmat_inv = _rmat.transpose();
+}
+
+e_rmat Surface::rmat_inv() const {
+    e_rmat rmat_inv = _rmat.transpose();
+    return rmat_inv;
 }
 
 void Surface::polygon() {
     auto rzset{false};
     auto addRing = [&](bg_ring& ring, const epts& pts) {
-        for (const auto& pt : pts) {
+        for (auto& pt : pts) {
             ep3 p{_rmat * pt};
-            ring.emplace_back(base_td(p.x()), base_td(p.y()));
+            ring.emplace_back(base_tdp(p));
             if (!rzset) {
                 _rotz = p(2);
                 rzset = true;
@@ -187,7 +129,7 @@ void Surface::polygon() {
     _area = std::abs(boost::geometry::area(_poly));
 }
 
-void Surface::direction() {
+bool Surface::direction() {
     if (id == c_roof_Id) {
         _dir = 4;
         bg_point bc(0.0, 0.0);
@@ -197,23 +139,21 @@ void Surface::direction() {
         _dir = surfaceDir(_normi);
         _center = (_pts[0] + _pts[2]) * 0.5;
     }
+    return _dir >= 0;
 }
 
-bool Surface::wpoly(int floor) {
-    //only for g_GP::stretch
-    if (id <= c_virtual_srf) return true;
-    if (!window.polys.empty()) return true;
+void Surface::wpoly(int floor) { //only for g_GP::stretch
+    if (!window.polys.empty()) return;
     if (window.wwr > c_1e_8 && window.wwr < 1 - c_1e_8) {
         auto r{std::sqrt(window.wwr)};
         auto add = [&](const bg_polygon& poly) {
-            auto&& wp{scalePoly(poly, r)};
+            auto wp{scalePoly(poly, r)};
             if (!boost::geometry::is_valid(wp)) {
                 boost::geometry::correct(wp);
             }
             window.area += std::abs(boost::geometry::area(wp));
             window.polys.emplace_back(wp);
         };
-
         auto bottom = [&](ep3& minp, ep3& maxp) {
             auto first{false};
             for (const auto& pt : _pts) {
@@ -228,34 +168,37 @@ bool Surface::wpoly(int floor) {
                 }
             }
         };
-        if (floor == 1 || id == c_roof_Id || id >= c_split_realId) {
+        
+        if (floor == 1 || id == c_roof_Id || _gap) {
             add(_poly);
-        } else {
-            //srf only have 4 points
+        } else { //srf only have 4 points
             ep3 minp(0, 0, 0);
             ep3 maxp(0, 0, 0);
             bottom(minp, maxp);
             auto h{(_h - minp(2)) / floor};
-            if (h < c_5e_2) return true;
+            if (h < c_5e_2) return;
             ep3 pt1{_rmat * minp};
             ep3 pt2{_rmat * maxp};
+            bg_polygon poly;
+            poly.outer().resize(4);
             for (int i = 0; i < floor; ++i) {
-                bg_polygon poly;
                 minp(2) += h;
                 ep3 pt{_rmat * minp};
-                poly.outer().emplace_back(base_td(pt.x()), base_td(pt.y()));
-                poly.outer().emplace_back(base_td(pt1.x()), base_td(pt1.y()));
-                poly.outer().emplace_back(base_td(pt2.x()), base_td(pt2.y()));
+                poly.outer()[0] = base_tdp(pt);
+                poly.outer()[1] = base_tdp(pt1);
+                poly.outer()[2] = base_tdp(pt2);
                 maxp(2) += h;
                 pt2 = _rmat * maxp;
-                poly.outer().emplace_back(base_td(pt2.x()), base_td(pt2.y()));
+                poly.outer()[3] = base_tdp(pt2);
                 pt1 = pt;
                 add(poly);
             }
         }
     }
+    if (window.full()) {
+        window.area = _area;
+    }
     _opaque = _area - window.area;
-    return true; 
 }
 
 void Surface::reset() {
@@ -266,37 +209,22 @@ void Surface::reset() {
     _lights.clear();
 }
 
-double Surface::lightArea() const {
-    double larea{};
-    for (const auto& lpoly : _lights) {
-        larea += std::abs(boost::geometry::area(lpoly));
-    }
-    return larea;
-}
-
 void Surface::setsr(double sr, double wsr, bool save) {
-    _sr = sr;
-    _wsr = wsr;
-    base_correct_sr(_sr);
-    base_correct_sr(_wsr);
+    base_correct_sr(_sr, sr);
+    base_correct_sr(_wsr, wsr);
     _scalc = true;
     if (save) {
         daysrs.emplace_back(std::pair{_sr, _wsr});
     }
 }
 
-bool Surface::calcsr(const ep3& sv, int pos) {
+void Surface::calcsr(const ep3& sv, int pos) {
     _cos_s = _normi.dot(sv);
-    if (pos < 0 || pos >= static_cast<int>(daysrs.size())) return false;
-    auto [sr, wsr] = daysrs[pos];
-    _sr = sr;
-    _wsr = wsr;
+    std::tie(_sr, _wsr) = daysrs.at(pos);
     _shdg = c_shadow_other_set;
-    return true;
 }
 
 void Surface::shadowInit(double sh, const ep3& sv, bool save, bool clear) {
-    if (id <= c_virtual_srf)  return;
     if (clear) {
         daysrs.clear();
     }
@@ -311,31 +239,6 @@ void Surface::shadowInit(double sh, const ep3& sv, bool save, bool clear) {
         _shdg = c_shadow_none;
         setsr(0.0, 0.0, save);
     }
-}
-
-void Surface::draw(double du, double dv) {
-    meshs.clear();
-    auto wallPoly{_poly};
-    for (const auto& wp : window.polys) {
-        base_gen_meshs(meshs, wp, du, dv, false);
-        wallPoly.inners().emplace_back(wp.outer());
-    }
-    if (!boost::geometry::is_valid(wallPoly)) {
-        boost::geometry::correct(wallPoly);
-    }
-    base_gen_meshs(meshs, wallPoly, du, dv, true);
-}
-
-void Surface::draw(Meshs& meshs_, double du, double dv) const {
-    auto wallPoly{_poly};
-    for (const auto& wp : window.polys) {
-        base_gen_meshs(meshs_, wp, du, dv, false);
-        wallPoly.inners().emplace_back(wp.outer());
-    }
-    if (!boost::geometry::is_valid(wallPoly)) {
-        boost::geometry::correct(wallPoly);
-    }
-    base_gen_meshs(meshs_, wallPoly, du, dv, true);
 }
 
 bool Polyhedron::init(int id, int buildId) {
@@ -361,14 +264,12 @@ bool Polyhedron::init(int id, int buildId) {
             }
         }        
     };
-    for (const auto& [_, srf] : srfs) {
+    for (const auto& srf : srfs) {
         extremum(srf._pts);
     }
     box << minp, maxp;
     _center = 0.5 * (minp + maxp);
-
-    _dis = 0.0;
-    for (auto& [_, srf] : srfs) {
+    for (auto& srf : srfs) {
         if (!srf.init(_center)) return false;
         for (const auto& pt : srf._pts) {
             ep3 p{_center - pt};
@@ -382,39 +283,86 @@ bool Polyhedron::init(int id, int buildId) {
     return true;
 }
 
-void base_generateSrfMeshs(SrfMeshs& smeshs, const GPhds& phds, const OneMany& b2pids, 
+void base_draw_meshs(std::vector<SrfMesh>& bmeshs, int phd, const Surface& srf, 
+    const bg_polygon& poly, double du, double dv, bool wall) {
+    auto generate = [&](const bg_polygon& grid) {
+        Polys outs;
+        if (!boost::geometry::intersection(poly, grid, outs) || outs.empty()) return;
+        for (auto& out : outs) {
+            if (!boost::geometry::is_valid(out)) {
+                boost::geometry::correct(out);
+            }
+            SrfMesh sm;
+            sm.phd = phd;
+            sm.srf = &srf;
+            auto& mesh = sm.m;
+            std::swap(mesh.poly, out);
+            mesh.area = boost::geometry::area(mesh.poly) * 1e-3;
+            boost::geometry::centroid(mesh.poly, mesh.c_rot);
+            mesh.wall = wall;
+            sm.setDir();
+            bmeshs.emplace_back(std::move(sm));
+        }
+    };
+    bg_box box;
+    boost::geometry::envelope(poly, box);
+    auto umin{box.min_corner().x()};
+    auto vmin{box.min_corner().y()};
+    auto umax{box.max_corner().x()};
+    auto vmax{box.max_corner().y()};
+    auto u_div{static_cast<int>(std::ceil((umax - umin) / du))};
+    auto v_div{static_cast<int>(std::ceil((vmax - vmin) / dv))};
+    bg_polygon grid;
+    auto& outer = grid.outer();
+    outer.resize(4);
+    for (int i = 0; i < u_div; ++i) {
+        auto u1{umin + i * du};
+        auto u2{u1 + du};
+        for (int j = 0; j < v_div; ++j) {
+            auto v1{vmin + j * dv};
+            auto v2{v1 + dv};
+            outer[0] = bg_point(u1, v1);
+            outer[1] = bg_point(u2, v1);
+            outer[2] = bg_point(u2, v2);
+            outer[3] = bg_point(u1, v2);
+            generate(grid);
+        }
+    }
+}
+
+void base_draw(std::vector<SrfMesh>& bmeshs, int phd, const Surface& srf, double du, double dv) {
+    auto wallPoly{srf._poly};
+    for (const auto& wp : srf.window.polys) {
+        base_draw_meshs(bmeshs, phd, srf, wp, du, dv, false);
+        wallPoly.inners().emplace_back(wp.outer());
+    }
+    if (!boost::geometry::is_valid(wallPoly)) {
+        boost::geometry::correct(wallPoly);
+    }
+    base_draw_meshs(bmeshs, phd, srf, wallPoly, du, dv, true);
+}
+
+void base_generate_meshs(SrfMeshs& smeshs, const GPhds& phds, const OneMany& b2pids, 
     const ShadowSet& cset, double droof, double dwall) {
-    Meshs meshs;
-    for (auto bid : cset.ids) {
-        auto& bmeshs = smeshs[bid];
-        auto pit = b2pids.find(bid);
-        if (pit == b2pids.end()) continue;
-        for (auto id : pit->second) {
-            if (id < 0 || id >= static_cast<int>(phds.size())) continue;
-            auto& phd = phds.at(id);
-            for (auto& [_, srf] : phd.srfs) {
-                meshs.clear();
-                if (srf.id == c_roof_Id) {
-                    srf.draw(meshs, droof, droof);
-                } else {
-                    srf.draw(meshs, dwall, dwall);
-                }
-                for (auto& m : meshs) {
-                    SrfMesh sm;
-                    sm.phd = id;
-                    sm.dir = srf._dir;
-                    if (!m.wall) {
-                        sm.dir += 4;
-                    }
+    for (auto id : cset.ids) {
+        smeshs.emplace(id, std::vector<SrfMesh>{});
+    }
+    auto fun = [&](int i, int begin, int end) {
+        for (i = begin; i < end; ++i) {
+            auto bid = cset.ids.at(i);
+            auto& pids = b2pids.at(bid);
+            auto& bmeshs = smeshs.at(bid);
+            for (auto id : pids) {
+                auto& phd = phds.at(id);
+                for (auto& srf : phd.srfs) {
                     if (srf.id == c_roof_Id) {
-                        sm.dir = 8;
+                        base_draw(bmeshs, id, srf, droof, droof);
+                    } else {
+                        base_draw(bmeshs, id, srf, dwall, dwall);
                     }
-                    sm.m = m;
-                    sm.m.area *= 1e-3;
-                    sm.srf = &srf;
-                    bmeshs.emplace_back(std::move(sm));
                 }
             }
         }
-    }    
+    };
+    asyncF(fun, cset.ids.size());
 }

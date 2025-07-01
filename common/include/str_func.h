@@ -9,10 +9,9 @@
 namespace sfunc {
 inline auto split(std::string_view str, std::string_view delim) {
     auto v = str | std::views::split(delim) | std::views::transform([](auto&& unit) {
-        return std::string(unit.begin(), unit.end());
+        return std::string_view(unit.begin(), unit.end());
     });
-    std::vector<std::string> vs{v.begin(), v.end()};
-    return vs;
+    return std::vector<std::string_view>{v.begin(), v.end()};
 }
 
 inline bool trimr(std::string& str) {

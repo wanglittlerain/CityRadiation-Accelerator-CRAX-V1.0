@@ -2,11 +2,9 @@
 #include "config.h"
 void init(GPhds& phds, const BFlags& bflags, const WWRs& wwrs) {
     for (auto& phd : phds) {
-        auto pit = bflags.find(phd._buildId);
-        if (pit == bflags.end()) continue;
+        if (!bflags.contains(phd._buildId)) continue;
         auto it = wwrs.find(phd._buildId);
-        for (auto& [_, srf] : phd.srfs) {
-            if (srf.id <= c_virtual_srf) continue;
+        for (auto& srf : phd.srfs) {
             if (it != wwrs.end()) {
                 it->second.set(srf.window, srf._dir);
                 srf.wpoly(phd.floor);
@@ -34,11 +32,14 @@ int main(int argc, char** argv) {
 
     std::ifstream ifs(file);
     json jconf = json::parse(ifs);
-    auto jval_fun = [&jconf](auto& val, std::string_view key) {
+    auto jval = [&jconf]<typename T>(std::string_view key, T&& def) {
+        T val{def};
         if (jconf.contains(key)) {
             val = jconf[key];
         }
+        return val;
     };
+
     bool sensor = jconf["calculate-sensor-data"];
     if (!sensor) {
         std::cout << "CRAX mesh err calculate-sensor-data false" << std::endl;
@@ -54,30 +55,27 @@ int main(int argc, char** argv) {
     std::string sdir = jconf["CRAX_input_folder"];
     fileDir = sdir;
 
-    ShadowSet cset;
+    NameIds nameIds;
     const json& jbs = jconf["buildings"];
     for (auto& b : jbs) {
-        cset.nameIds.emplace(std::string(b), 0);
+        nameIds.emplace(std::string(b), 0);
     }
 
-    std::string zoneGeo{"zone_building_geometry.csv"};
-    jval_fun(zoneGeo, "zone-geo");
+    std::string zoneGeo = jval("zone_geo", std::string("zone_building_geometry.csv"));
     auto geo1{fileDir / zoneGeo};
-    double sdis1{};
-    jval_fun(sdis1, "zone-geometry");
-    std::string surrGeo{"surroundings_building_geometry.csv"};
-    jval_fun(surrGeo, "surrounding-geo");
-    double sdis2{};
-    jval_fun(sdis2, "surrounding-geometry");
+    double sdis1 = jval("zone-geometry", 0.0);
+    std::string surrGeo = jval("surrounding-geo", std::string("surroundings_building_geometry.csv"));
+    double sdis2 = jval("surrounding-geometry", 0.0);
     auto geo2{fileDir / surrGeo};
     bool neglect = jconf["neglect-adjacent-buildings"];
     GPhds phds;
-    WWRs wwrs;
+    ShadowSet cset;
     BFlags bflags;
     OneMany b2pids;
     {
         std::vector<GeoConf> confs;
-        if (!g_config.readGeoData(geo1, geo2, confs, cset, wwrs, sdis1, sdis2, neglect)) {
+        WWRs wwrs;
+        if (!g_config.readGeoData(geo1, geo2, confs, nameIds, cset, wwrs, sdis1, sdis2, 0.0, neglect)) {
             std::cout << "readGeoData err" << std::endl;
             return 1;
         }
@@ -88,17 +86,14 @@ int main(int argc, char** argv) {
             info.name = conf.name;
             info.te = conf.te;
         }
+        init(phds, bflags, wwrs);
     }
-
-    init(phds, bflags, wwrs);
 
     SrfMeshs meshs;
     std::string output = jconf["CRAX_result_folder"];
-    auto droof{1.0};
-    jval_fun(droof, "roof-grid");
-    auto dwall{1.0};
-    jval_fun(dwall, "walls-grid");
-    base_generateSrfMeshs(meshs, phds, b2pids, cset, droof, dwall);
+    auto droof{jval("roof-grid", 1.0)};
+    auto dwall{jval("walls-grid", 1.0)};
+    base_generate_meshs(meshs, phds, b2pids, cset, droof, dwall);
 
     fileDir = output;
     g_config.writeMeshs(meshs, fileDir, bflags);
