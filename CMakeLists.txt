@@ -15,6 +15,12 @@ if(MSVC)
 	set(CMAKE_CXX_FLAGS_DEBUG "/Od /MDd /D_DEBUG")
 elseif(APPLE)
 	set(CMAKE_CXX_STANDARD "23")
+	set(CMAKE_OSX_DEPLOYMENT_TARGET "13.3")
+    message(STATUS "macOS deployment target: ${CMAKE_OSX_DEPLOYMENT_TARGET}")
+
+    # Add deployment target specific flags
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+
 	set(CMAKE_CXX_FLAGS_DEBUG "-Og -Wall -Wextra -Wfatal-errors -std=c++2b -ggdb -D_DEBUG -Wno-deprecated -Wno-deprecated-declarations")
 	set(CMAKE_CXX_FLAGS_RELEASE "-O3 -g -Wall -Wextra -Wfatal-errors -std=c++2b -Wno-deprecated -Wno-deprecated-declarations -Wno-unused-parameter")
 else()
