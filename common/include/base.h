@@ -8,62 +8,67 @@ inline double deg2rad(double deg) {
     return deg * c_d2r;
 }
 
-inline void base_correct_sr(double& sr) {
-    if (sr > 1.0) {
-        sr = 1.0;
-    } else if (sr < 0.0) {
-        sr = 0.0;
-    }
+inline void base_correct_sr(double& sr, double v) {
+    sr = std::min(1.0, std::max(0.0, v));
 }
 
 inline double base_td(double val) {
     return std::round(val * 1e4) * 1e-4;
 }
 
+inline bg_point base_tdp(const ep3& p) {
+    return bg_point{base_td(p.x()), base_td(p.y())};
+}
+
+inline double div_s(double x, double y) {
+    return (y > -c_1e_8 && y < c_1e_8) ? 0.0 : x / y;
+}
+
 struct Solar {
     ep3 v;
     double h{};
-
     double longitude{};
     double sinlat{};
     double coslat{};
     double e{};
     double sinD{};
     double cosD{};
-
     int day{-1};
     int _start{};
     int _step{};
 
-    inline void init(double lat, double lon, double ls, int start = 0) {
+    Solar(double lat, double lon, double ls, int start = 0) {
         lat = deg2rad(lat);
         sinlat = std::sin(lat);
         coslat = std::cos(lat);
         longitude = lon - ls - 180.0;
         _start = start; 
     }
-    void sv(int d, double hour, int step);
+
+    void sv(int step);
 };
 
-using NameIds = std::map<std::string, int>;
 struct ShadowSet {
-    NameIds nameIds;
     std::vector<int> ids;
     int day{};
     bool all{true};
-    bool mode{true};
+    bool diffuse{};
+    bool separate{};
     bool mt{true};
-    mutable bool diffuse{};
-    mutable int ctype{1}; //0(no calc srf) 1(calc and separate) 2(calc as one wall)
 
-    inline bool should(int id) const {
-        if (!all && !std::binary_search(ids.begin(), ids.end(), id)) return false;
-        return true;
+    inline bool have(int id) const {
+        return all || std::binary_search(ids.begin(), ids.end(), id);
     }
 
-    inline void dset(bool diff, int type) const {
-        diffuse = diff;
-        ctype = type;
+    inline void dset(bool df = false, bool mesh = false) {
+        diffuse = df;
+        if (diffuse) {
+            separate &= mesh;
+        }
+    }
+
+    inline int type() const {
+        return diffuse ? (separate ? 0 : 1) : 2; //0(no calc srf) 1(as one wall) 2(wall + window)
     }
 };
 
@@ -75,35 +80,55 @@ struct Subsurface {
     inline bool exist() const {
         return wwr > c_1e_8 || !polys.empty();
     }
-};
 
-struct WWRatio {
-    std::array<double, 5> rs{};
-    inline void set(Subsurface& sf, int dir) const {
-        sf.wwr = rs[dir];
-        base_correct_sr(sf.wwr);
+    inline bool full() const {
+        return wwr > 1.0 - c_1e_8;
     }
 };
 
 struct DiffuseR {
-    double withShdgIsoSky{};
-    double rdome{};
-    double withShdgHoriz{};
-    double rhorizon{};
-    double withShdgGround{};
-    double rdomeG{};
+    double shdgIsoSky{}; //-> reuse reflection_factor
+    double rdome{}; //woShdgIsoSky rdome *= (1.0 + cos_g)
+    double shdgHoriz{};
+    double rhorizon{}; //woShdgHoriz rhorizon *= sin_g
+    double shdgGround{};
+    double rdomeG{}; //woShdgGround rdomeg *= 0.5 * (1.0 - cos_g)
 
-    void calc() {
-        auto fun = [](double a, double b) {
-            if (std::abs(b) > c_1e_8) {
-                return a / b;
-            } else {
-                return a / (b + c_1e_8);
+    inline void add(double cosPhi, double sunCosTheta, double sr, int iphi, bool dome) {
+        auto woShdg{cosPhi * sunCosTheta};
+        auto withShdg{woShdg * (1.0 - sr)};
+        if (dome) {
+            shdgIsoSky += withShdg;
+            rdome += woShdg;
+            if (iphi == 0) {
+                shdgHoriz += withShdg;
+                rhorizon += woShdg;
             }
-        };
-        rdome = fun(withShdgIsoSky, rdome);
-        rhorizon = fun(withShdgHoriz, rhorizon);
-        rdomeG = fun(withShdgGround, rdomeG);
+        } else {
+            shdgGround += withShdg;
+            rdomeG += woShdg;
+        }        
+    }
+
+    inline DiffuseR& operator+=(const DiffuseR& rhs) {
+        shdgIsoSky += rhs.shdgIsoSky;
+        rdome += rhs.rdome;
+        shdgHoriz += rhs.shdgHoriz;
+        rhorizon += rhs.rhorizon;
+        shdgGround += rhs.shdgGround;
+        rdomeG += rhs.rdomeG;
+        return *this;
+    }
+
+    inline void calc(double sin_g, double cos_g) {//reuse
+        rdome = div_s(shdgIsoSky * (1.0 + cos_g), rdome);
+        rhorizon = div_s(shdgHoriz * sin_g, rhorizon);
+        rdomeG = div_s(shdgGround * 0.5 * (1.0 - cos_g), rdomeG);
+        shdgIsoSky = 1.0 - 0.5 * rdome - rdomeG;
+    }
+
+    inline double factor() const {
+        return shdgIsoSky;
     }
 };
 
@@ -116,19 +141,16 @@ struct Mesh {
     bool wall{};
 
     inline std::string poly2str() const {
-        std::string pstr{};
+        std::string str{};
         for (const auto& p : poly.outer()) {
-            if (!pstr.empty()) {
-                pstr += " ";
-            }
-            auto val{std::format("{} {}", p.x(), p.y())};
-            pstr += val;
+            str += std::format("{} {} ", p.x(), p.y());
         }
-        return pstr;
+        if (!str.empty()) {
+            str.pop_back();
+        }
+        return str;
     }
 };
-using Meshs = std::vector<Mesh>;
-void base_gen_meshs(Meshs& meshs, const bg_polygon& poly, double du, double dv, bool wall);
 
 struct Surface {
     int id{};
@@ -138,48 +160,45 @@ struct Surface {
     double _h{};
     double _area{};
     double _opaque{};
+    double _amwall{};
+    double _amwin{};
     double _sin_g{};
+    bool _gap{};
     bool _gcalc{};
-
     bool _scalc{};
     int _shdg{};
-    double _cos_s{};
-    mutable double _sr{}; //shadow ratio -> (mutable) wall total radiation 
+    mutable double _cos_s{};
+    mutable double _sr{}; //shadow ratio -> (mutable) wall baseIntensity
     mutable double _wsr{};
 
     epts _pts;
     std::vector<epts> inners;
     Subsurface window;
-    ep3 _normi;
+    ep3 _normi{};
     ep3 _center{};
     e_rmat _rmat;
-    e_rmat _rmat_inv;
     bg_polygon _poly;
     Polys _lights;
     DiffuseR _dr;
     bg_segment gseg;
-    Meshs meshs;
     std::vector<std::pair<double, double>> daysrs;
 
     bool init(const ep3& center);
-    bool wpoly(int floor);
+    e_rmat rmat_inv() const;
+
+    void wpoly(int floor);
 
     void reset();
     void setsr(double sr, double wsr, bool save);
     void shadowInit(double sh, const ep3& sv, bool save, bool clear);
-
-    double lightArea() const;
-
-    bool calcsr(const ep3& sv, int pos);
-    void draw(double du, double dv);
-    void draw(Meshs& meshs_, double du, double dv) const;
+    void calcsr(const ep3& sv, int pos);
 private:
     bool equation(const ep3& c);
     void rotation();
     void polygon();
-    void direction();
+    bool direction();
 };
-using Surfaces = std::map<int, Surface>;
+using Surfaces = std::vector<Surface>;
 using NBHDs = std::vector<const Surface*>;
 
 struct Polyhedron {
@@ -187,10 +206,11 @@ struct Polyhedron {
     int _buildId{};
     int floor{1};
     Surfaces srfs;
-    ebbox box;
+    ebbox box; //te=box(2) h=box(5)
     ep3 _center;
     double _dis{};
     NBHDs nbhds;
+    
     bool init(int id, int buildId);
 };
 using GPhds = std::vector<Polyhedron>;
@@ -203,7 +223,12 @@ struct SrfMesh {
     DiffuseR _dr{};
     std::bitset<24> daysrs;
 
-    inline void shadow_(int pos, bool clear, bool save, bool intersect = false) {
+    inline void setDir() {
+        if (srf == nullptr) return;
+        dir = (m.wall && srf->id != c_roof_Id) ? srf->_dir : srf->_dir + 4;
+    }
+
+    inline void shadow(int pos, bool clear, bool save, bool intersect = false) {
         if (srf->_shdg == c_shadow_other_set) {
             m.sr = daysrs[pos];
             return;
@@ -211,33 +236,26 @@ struct SrfMesh {
         if (clear && save) {
             daysrs.set();
         }
-        auto s{false};
-        if (srf->_shdg == c_shadow_full) {
-            m.sr = 1.0;
-            s = true;
-        } else if (srf->_shdg == c_shadow_none) {
-            m.sr = 0.0;
-        } else {
+        auto f = [&](bool s) {
+            m.sr = s;
+            if (!s && save) {
+                daysrs.reset(pos);
+            }
+        };
+        if (srf->_shdg == c_shadow_init) {
             if (!intersect || m.poly.outer().empty()) {
-                if (!pointInPolys(m.c_rot, srf->_lights)) {
-                    m.sr = 1.0;
-                    s = true;
-                } else {
-                    m.sr = 0.0;
-                }
+                f(!pointInPolys(m.c_rot, srf->_lights));
             } else {
                 auto larea{intersectArea(m.poly, srf->_lights)};
-                m.sr = 1.0 - larea / m.area;
-                base_correct_sr(m.sr);
-            }
-        }
-        if (save && !s) {
-            daysrs.reset(pos);
+                base_correct_sr(m.sr, 1.0 - larea / m.area);
+            } 
+        } else {
+            f(srf->_shdg == c_shadow_full);
         }
     }
 };
+
 using SrfMeshs = std::map<int, std::vector<SrfMesh>>;
 using OneMany = std::map<int, std::vector<int>>;
-
-void base_generateSrfMeshs(SrfMeshs&, const GPhds&, const OneMany&, const ShadowSet&, double, double);
+void base_generate_meshs(SrfMeshs&, const GPhds&, const OneMany&, const ShadowSet&, double, double);
 #endif

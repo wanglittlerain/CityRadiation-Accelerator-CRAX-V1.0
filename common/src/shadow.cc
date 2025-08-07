@@ -15,8 +15,8 @@ void Shadow::calculate(GPhds& phds, Solar& s, const ShadowSet& cset) const {
     if (day < cset.day) {
         auto pos{len % 24};
         for (auto& phd : phds) {
-            if (!cset.should(phd._buildId)) continue;
-            for (auto& [_, srf] : phd.srfs) {
+            if (!cset.have(phd._buildId)) continue;
+            for (auto& srf : phd.srfs) {
                 srf.calcsr(s.v, pos);
             }
         }
@@ -32,9 +32,10 @@ void Shadow::cfun(GPhds& phds, double sh, const ep3& sv, const ShadowSet& cset, 
     init(phds, sh, sv, save, clear);
     if (sh <= 0.0) return;
     auto tansh{std::tan(sh)};
+    auto mt{cset.diffuse && cset.mt};
+    auto type{cset.type()};
     auto f_nbhds = [&](Polyhedron& phd) {
-        if (!cset.should(phd._buildId)) return false;
-        if (!cset.mt) return true;
+        if (!mt) return;
         for (const auto& nphd : phds) {
             if (phd._id == nphd._id) continue;
             if (phd._buildId == nphd._buildId) {
@@ -42,144 +43,125 @@ void Shadow::cfun(GPhds& phds, double sh, const ep3& sv, const ShadowSet& cset, 
                 continue;
             }
             auto dis{ndis(phd, nphd, tansh)};
-            if (dis < nphd.box(5) && (cset.diffuse || check(phd.box, nphd.box, sv))) {
-                add(phd.nbhds, nphd.srfs);
-            }
+            checkAdd(phd, nphd, sv, dis, cset.diffuse);
         }
-        return true;
     };
-    auto f = [&](int begin, int end) {
-        for (int i = begin; i < end; ++i) {
+    auto f = [&](int i, int begin, int end) {
+        for (i = begin; i < end; ++i) {
             auto& phd = phds.at(i);
-            if (!f_nbhds(phd)) continue;
-            auto noNbhd{phd.nbhds.empty()};
-            for (auto& [_, srf] : phd.srfs) {
+            if (!cset.have(phd._buildId)) continue;
+            f_nbhds(phd);
+            for (auto& srf : phd.srfs) {
                 if (srf._scalc) continue;
-                if (noNbhd) {
+                if (phd.nbhds.empty()) {
                     srf._shdg = c_shadow_none;
                     if (save) {
                         srf.setsr(0.0, 0.0, save);
                     }
                     continue;
                 }
-                if (cset.mode) {
-                    forward(srf, phd.nbhds, sv, cset.ctype, save);
-                } else {
-                    backward(srf, phd.nbhds, -sv, cset.ctype, save);
-                }
+                forward(srf, phd.box(2), phd.nbhds, sv, type, save);
             }
         }
     };
-    if (cset.mt) {
+    
+    if (mt) {
         asyncF(f, phds.size());
     } else {
         neighborhoods(tansh, sv, phds, cset);
-        f(0, static_cast<int>(phds.size()));
+        f(0, 0, static_cast<int>(phds.size()));
     }
 }
 
-void Shadow::diffuse(GPhds& phds, SrfMeshs& smeshs, const ShadowSet& cset, bool alone) const {
-    auto constexpr NPhi = 6;                      // Number of altitude angle steps for sky integration
-    auto constexpr NTheta = 24;                   // Number of azimuth angle steps for sky integration
-    auto constexpr DPhi = 0.5 * c_pi / NPhi;       // Altitude step size
-    auto constexpr DTheta = 2.0 * c_pi / NTheta;   // Azimuth step size
-    auto constexpr PhiMin = 0.5 * DPhi;           // Minimum altitude
-    auto fd_fun = [](DiffuseR& fd, double cos_Phi, double sunCosTheta, double sr, int iPhi, bool dome) {
-        auto woShdg{cos_Phi * sunCosTheta * -1.0};
-        auto withShdg{woShdg * (1.0 - sr)};
-        if (dome) {
-            fd.withShdgIsoSky += withShdg;
-            fd.rdome += woShdg;
-            if (iPhi == 0) {
-                fd.withShdgHoriz += withShdg;
-                fd.rhorizon += woShdg;
-            }
-        } else {
-            fd.withShdgGround += withShdg;
-            fd.rdomeG += woShdg;
-        }
-    };
-    alone &= !smeshs.empty();
-    if (alone) {
-        cset.dset(true, 0);
-    } else {
-        cset.dset(true, 2);
-    }
+void Shadow::diffuse(GPhds& phds, SrfMeshs& smeshs, const ShadowSet& cset, int begin, int end) const {
+    auto constexpr DPhi{0.5 * c_pi / c_phi};       // Altitude step size
+    auto constexpr DTheta{2.0 * c_pi / c_theta};   // Azimuth step size
+    auto constexpr PhiMin{0.5 * DPhi};           // Minimum altitude
     ep3 sv;
-    for (int IPhi = 0; IPhi < NPhi; ++IPhi) { // Loop over patch altitude values
-        auto Phi = PhiMin + IPhi * DPhi;
-        sv(2) = -std::sin(Phi);
-        auto cos_Phi{std::cos(Phi)};
-        for (int ITheta = 0; ITheta < NTheta; ++ITheta) { // Loop over patch azimuth values
-            auto Theta = ITheta * DTheta;
-            auto cos_Theta{std::cos(Theta)};
-            auto sin_Theta{std::sin(Theta)};
-            sv(0) = cos_Phi * sin_Theta;
-            sv(1) = cos_Phi * cos_Theta;
-            
-            auto r_fun = [&](bool dome) {
-                cfun(phds, Phi, sv, cset, false);
-                if (alone) {
-                    for (auto& [_, meshs] : smeshs) {
-                        for (auto& mesh : meshs) {
-                            auto sunCosTheta{mesh.srf->_cos_s};
-                            if (sunCosTheta >= 0.0) continue;
-                            mesh.shadow_(0, false, false, true);
-                            fd_fun(mesh._dr, cos_Phi, sunCosTheta, mesh.m.sr, IPhi, dome);
-                        }
+    auto phi{0.0};
+    auto cosPhi{0.0};
+    auto f_phi = [&](int iphi) {
+        phi = PhiMin + iphi * DPhi;
+        sv(2) = -std::sin(phi);
+        cosPhi = std::cos(phi);
+    };
+    auto f_dr = [&](int iphi, bool dome, bool last = false) {
+        cfun(phds, phi, sv, cset, false);
+        if (cset.separate) {
+            for (auto& [_, meshs] : smeshs) {
+                for (auto& mesh : meshs) {
+                    if (mesh.srf->_cos_s < 0.0) {
+                        mesh.shadow(0, false, false, true);
+                        mesh._dr.add(cosPhi, mesh.srf->_cos_s, mesh.m.sr, iphi, dome);
                     }
-                } else {
-                    for (auto& phd : phds) {
-                        for (auto&[_, srf] : phd.srfs) {
-                            if (srf.id <= c_virtual_srf || srf._cos_s >= 0.0) continue;
-                            fd_fun(srf._dr, cos_Phi, srf._cos_s, srf._sr, IPhi, dome);
-                        }
+                    if (last) {
+                        mesh._dr.calc(mesh.srf->_sin_g, mesh.srf->_normi(2));
                     }
                 }
-            };
-            r_fun(true);
-            sv(2) *= -1.0;
-            r_fun(false);
-            sv(2) *= -1.0;
+            }
+            return;
         }
-    }
-
-    if (!alone) {
         for (auto& phd : phds) {
-            for (auto&[_, srf] : phd.srfs) {
-                srf._dr.calc();
+            for (auto& srf : phd.srfs) {
+                if (srf._cos_s < 0.0) {
+                    srf._dr.add(cosPhi, srf._cos_s, srf._sr, iphi, dome);
+                }
+                if (last) {
+                    srf._dr.calc(srf._sin_g, srf._normi(2));
+                }
+            }
+        }
+    };
+    auto loop = [&](int iphi, int itheta, bool last = false) {
+        auto theta{itheta * DTheta};
+        auto cosTheta{std::cos(theta)};
+        auto sinTheta{std::sin(theta)};
+        sv(0) = cosPhi * sinTheta;
+        sv(1) = cosPhi * cosTheta;
+        f_dr(iphi, true);
+        sv(2) *= -1.0;
+        f_dr(iphi, false, last);
+        sv(2) *= -1.0;
+    };
+
+    if (cset.mt) {
+        for (int i = begin; i < end; ++i) {
+            auto iphi{i / c_theta};
+            auto itheta{i % c_theta};
+            f_phi(iphi);
+            loop(iphi, itheta);
+        }
+    } else {
+        for (int iphi = 0; iphi < c_phi; ++iphi) { // Loop over patch altitude values
+            f_phi(iphi);
+            for (int itheta = 0; itheta < c_theta; ++itheta) { // Loop over patch azimuth values
+                auto last{iphi == c_phi - 1 && itheta == c_theta - 1};
+                loop(iphi, itheta, last);
+            }
+        }
+        if (cset.separate) return;
+        for (auto& [_, meshs] : smeshs) {
+            for (auto& mesh : meshs) {
+                mesh._dr = mesh.srf->_dr;
             }
         }
     }
-    for (auto& [_, meshs] : smeshs) {
-        for (auto& mesh : meshs) {
-            if (alone) {
-                mesh._dr.calc();
-                continue;
-            }
-            mesh._dr.rdome = mesh.srf->_dr.rdome;
-            mesh._dr.rhorizon = mesh.srf->_dr.rhorizon;
-            mesh._dr.rdomeG = mesh.srf->_dr.rdomeG;
-        }
-    }
-    cset.dset(false, 1);
 }
 
 void Shadow::init(GPhds& phds, const double sh, const ep3& sv, bool save, bool clear) const {
     for (auto& phd : phds) {
         phd.nbhds.clear();
-        for (auto& [_, srf] : phd.srfs) {
+        for (auto& srf : phd.srfs) {
             srf.shadowInit(sh, sv, save, clear);
         }
     }
 }
 
-double Shadow::ndis(const Polyhedron& phd1, const Polyhedron& phd2, const double tansh) const {
+double Shadow::ndis(const Polyhedron& phd1, const Polyhedron& phd2, double tansh) const {
     ep3 pt{phd1._center - phd2._center};
     pt(2) = 0.0;
     auto dis{pt.norm() - phd1._dis - phd2._dis};
-    dis *= tansh;
-    return dis;
+    return dis * tansh;
 }
 
 bool Shadow::check(const ebbox& b1, const ebbox& b2, const ep3& sv) const {
@@ -193,55 +175,62 @@ bool Shadow::check(const ebbox& b1, const ebbox& b2, const ep3& sv) const {
 }
 
 void Shadow::add(NBHDs& res, const Surfaces& nsrfs) const {
-    for (auto& [_, srf] : nsrfs) {
-        if (srf._shdg < c_shadow_full && srf.id > c_virtual_srf) {
+    for (auto& srf : nsrfs) {
+        if (srf._shdg < c_shadow_full) {
             res.emplace_back(&srf);
         }
     }
 }
 
+void Shadow::checkAdd(Polyhedron& phd, const Polyhedron& nphd, const ep3& sv, double dis, bool dfuse) const {
+    auto relative{nphd.box(5) - phd.box(2)};
+    if (dfuse && phd.box(2) > 0.0) {
+        relative = nphd.box(5);
+    }
+    if (dis < relative && (dfuse || check(phd.box, nphd.box, sv))) {
+        add(phd.nbhds, nphd.srfs);
+    }
+}
+
 void Shadow::neighborhoods(double tansh, const ep3& sv, GPhds& phds, const ShadowSet& cset) const {
     for (auto it = phds.begin(); it != phds.end(); ++it) {
-        auto need{cset.should(it->_buildId)};
+        auto have{cset.have(it->_buildId)};
         auto jt{it};
         for (++jt; jt != phds.end(); ++jt) {
             if (it->_buildId == jt->_buildId) {
-                if (need) {
+                if (have) {
                     add(it->nbhds, jt->srfs);
                     add(jt->nbhds, it->srfs);
                 }
                 continue;
             }
-            auto jneed{cset.should(jt->_buildId)};
-            if (need || jneed) {
-                auto dis{ndis(*it, *jt, tansh)};
-                if (need && dis < jt->box(5) && (cset.diffuse || check(it->box, jt->box, sv))) {
-                    add(it->nbhds, jt->srfs);
-                }
-                if (jneed && dis < it->box(5) && (cset.diffuse || check(jt->box, it->box, sv))) {
-                    add(jt->nbhds, it->srfs);
-                }
+            auto jhave{cset.have(jt->_buildId)};
+            if (!have && !jhave) continue;
+            auto dis{ndis(*it, *jt, tansh)};
+            if (have) {
+                checkAdd(*it, *jt, sv, dis, cset.diffuse);
             }
+            if (jhave) {
+                checkAdd(*jt, *it, sv, dis, cset.diffuse);
+            } 
         }
     }
 }
 
-void Shadow::forward(Surface& srf, const NBHDs& nbhds, const ep3& sv, int type, bool save) const {
+void Shadow::forward(Surface& srf, double te, const NBHDs& nbhds, const ep3& sv, int type, bool save) const {
     auto has{false};
     bg_polygon poly;
-    auto fun = [&](const epts& ps, double fh) {
-        if (!_projection(poly, srf, sv, ps, fh)) return false;
-        auto sarea{std::abs(boost::geometry::area(poly))};
-        if (sarea < 1e-1) return false;
-        auto area{0.0};
-        if (!intersectArea(srf._poly, poly, area)) return false;
-        if (area < 1e-1 || area > std::min(sarea, srf._area)) return false;
-        has = true;
-        if (difference(srf._lights, srf._poly, poly)) return true;
-        return false;
-    };
+    te = std::min(0.0, te);
     for (auto n : nbhds) {
-        if (fun(n->_pts, n->_h)) break;
+        if (n->_h < te) continue;
+        if (!_projection(poly, srf, sv, n->_pts, n->_h, te)) continue;
+        auto sarea{std::abs(boost::geometry::area(poly))};
+        if (sarea < 1e-1) continue;
+        auto area{0.0};
+        if (!intersectArea(srf._poly, poly, area)) continue;
+        if (area < 1e-1 || area > std::min(sarea, srf._area)) continue;
+        has = true;
+        if (difference(srf._lights, srf._poly, poly)) break;
     }
     if (!has) {
         srf._shdg = c_shadow_none;
@@ -251,11 +240,11 @@ void Shadow::forward(Surface& srf, const NBHDs& nbhds, const ep3& sv, int type, 
     srfcalc(srf, type, save);
 }
 
-bool Shadow::_projection(bg_polygon& poly, const Surface& srf, const ep3& sv, 
-    const epts& pts, double fh) const {
+bool Shadow::_projection(bg_polygon& poly, const Surface& srf, 
+    const ep3& sv, const epts& pts, double fh, double te) const {
     auto terrain = [&](double& h) {
         if (h < fh - c_1e_2) {
-            h = 0.0;
+            h = te;
         }
     };
     auto insert = [&](ep3 p0, ep3 p1) {
@@ -266,93 +255,78 @@ bool Shadow::_projection(bg_polygon& poly, const Surface& srf, const ep3& sv,
         auto t{(srf._d - p0.dot(srf._normi)) / ddot};
         ep3 sp{p0 + t * dir};
         ep3 pt{srf._rmat * sp};
-        poly.outer().emplace_back(base_td(pt.x()), base_td(pt.y()));
+        poly.outer().emplace_back(base_tdp(pt));
     };
-    poly.clear();
     ep3 sp;
     auto proj = [&](ep3 pt) {
         terrain(pt(2));
-        auto before{false};
-        auto t{(srf._d - pt.dot(srf._normi)) / srf._cos_s};
-        if (t > c_1e_8) {
-            before = true;
+        auto t{srf._d - pt.dot(srf._normi)};
+        if (t < 0.0) {
+            t /= srf._cos_s;
             sp = pt + t * sv;
+            return true;
         }
-        return before;        
+        return false;
     };
+    poly.clear();
     auto front{proj(pts.back())};
-    int i{};
-    for (const auto& it : pts) {
-        auto before{proj(it)};
+    for (int i = 0; i < static_cast<int>(pts.size()); ++i) {
+        auto before{proj(pts[i])};
         if (front != before) {
             if (i == 0) {
-                insert(pts.back(), it);
+                insert(pts.back(), pts[i]);
             } else {
-                insert(pts[i - 1], it);
+                insert(pts[i - 1], pts[i]);
             }
         }
         if (before) {
             ep3 pt{srf._rmat * sp};
-            poly.outer().emplace_back(base_td(pt.x()), base_td(pt.y())); 
+            poly.outer().emplace_back(base_tdp(pt)); 
         }
         front = before;
-        ++i;
     }
-    return !poly.outer().empty();   
+    return poly.outer().size() > 2;
 }
 
 void Shadow::srfcalc(Surface& srf, int type, bool save) const {
     if (type <= 0 || srf._scalc) return;
-    auto larea{srf.lightArea()};
-    auto asr{1.0 - larea / srf._area};
-    if (type == 2) {
-        srf.setsr(asr, asr, save);
+    auto larea{polysArea(srf._lights)};
+    auto sr{1.0 - larea / srf._area};
+    if (type == 1) {
+        srf.setsr(sr, sr, save);
         return;
     }
-    auto sr{asr};
     auto wsr{0.0};
     if (!srf.window.polys.empty()) {
         auto swinArea{0.0};
         for (const auto& winPoly : srf.window.polys) {
             swinArea += substract(winPoly, srf._lights);
         }
-        if (srf.window.area > c_1e_8) {
-            wsr = swinArea / srf.window.area;
-        }
-        if (srf._opaque < c_1e_8) {
-            sr = 0.0;
-        } else {
-            auto osa{srf._area - larea - swinArea};
-            if (osa < c_1e_8) {
-                osa = 0.0;
-            }
-            sr = osa / srf._opaque;
-        }
-    } else {
-        if (srf.window.wwr > 1.0 - c_1e_8) {
-            wsr = asr;
-            sr = 0.0;
-        }
+        wsr = div_s(swinArea, srf.window.area);
+        sr = div_s(std::max(srf._area - larea - swinArea, 0.0), srf._opaque);
+    } else if (srf.window.full()) {
+        wsr = sr;
+        sr = 0.0;
     }
     srf.setsr(sr, wsr, save);
 }
 
 bool Shadow::difference(Polys& res, const bg_polygon& totalPoly, const bg_polygon& poly) const {
-    auto df = [](Polys& res, const bg_polygon& p1, const bg_polygon& p2) {
+    auto df = [&](const bg_polygon& p1) {
         Polys out;
-        boost::geometry::difference(p1, p2, out);
-        for (const auto& pot : out) {
-            if (boost::geometry::area(pot) < 1e-1) continue;
-            res.emplace_back(pot);
+        boost::geometry::difference(p1, poly, out);
+        for (auto& p : out) {
+            if (boost::geometry::area(p) < 1e-1) continue;
+            res.emplace_back(std::move(p));
         }
     };
     if (res.empty()) {
-        df(res, totalPoly, poly);
+        df(totalPoly);
     } else {
         Polys tmp;
         tmp.swap(res);
-        for (const auto& tpoly : tmp) {
-            df(res, tpoly, poly);
+        for (const auto& p : tmp) {
+            df(p);
         }
     }
     return res.empty();
@@ -361,67 +335,8 @@ bool Shadow::difference(Polys& res, const bg_polygon& totalPoly, const bg_polygo
 double Shadow::substract(const bg_polygon& totalPoly, const Polys& intersectPolys) const {
     if (intersectPolys.empty()) return std::abs(boost::geometry::area(totalPoly));
     Polys res;
-    for (const auto& poly : intersectPolys) {
+    for (auto& poly : intersectPolys) {
         if (difference(res, totalPoly, poly)) break;
     }
-    auto area{0.0};
-    for (const auto& poly : res) {
-        area += std::abs(boost::geometry::area(poly));
-    }
-    return area;
-}
-
-bool Shadow::projection_(const Surface* nsrf, const ep3& sv, const ep3& p) const {
-    if (nsrf == nullptr) return false;
-    auto t{(nsrf->_d - nsrf->_normi.dot(p)) / nsrf->_cos_s};
-    ep3 ap{t * sv};
-    if (std::abs(ap[0]) < c_5e_2 && std::abs(ap[1]) < c_5e_2 && std::abs(ap[2]) < c_5e_2) return false;
-    if (ap.dot(sv) < c_5e_2) return false;
-    ep3 sp = p + ap;
-    ep3 pt{nsrf->_rmat * sp};
-    bg_point bp(pt(0), pt(1));
-    if (boost::geometry::covered_by(bp, nsrf->_poly)) {
-        return true;
-    }
-    return false;
-}
-
-void Shadow::backward(Surface& srf, const NBHDs& nbhds, const ep3& sv, int type, bool save) const {
-    auto sarea{0.0};
-    auto wsarea{0.0};
-    for (auto& m : srf.meshs) {
-        for (auto n : nbhds) {
-            ep3 c = srf._rmat_inv * ep3(m.c_rot.x(), m.c_rot.y(), srf._rotz); //m.c
-            if (!projection_(n, sv, c)) {
-                m.sr = 1.0;
-                continue;
-            }
-            m.sr = 0.0;
-            if (type > 0) {
-                if (m.wall) {
-                    sarea += m.area;
-                } else {
-                    wsarea += m.area;
-                }
-            }
-            break;
-        }
-    }
-    if (type > 0) {
-        auto fun = [](double sarea, double tarea, double& r){
-            if (tarea > c_1e_8) {
-                r = sarea / tarea;
-            }
-        };
-        auto sr{0.0};
-        auto wsr{0.0};
-        fun(sarea, srf._opaque, sr);
-        fun(wsarea, srf.window.area, wsr);
-        if (type == 1) {
-            srf.setsr(sr, wsr, save);
-        } else {
-            fun(sarea + wsarea, srf._area, sr);
-            srf.setsr(sr, sr, save);
-        }
-    }
+    return polysArea(res);
 }
