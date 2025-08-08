@@ -10,6 +10,7 @@
 #include <condition_variable>
 #include <atomic>
 #include <future>
+#include <functional>
 const static size_t _ghc = std::thread::hardware_concurrency();
 class ThreadPool {
 public:
