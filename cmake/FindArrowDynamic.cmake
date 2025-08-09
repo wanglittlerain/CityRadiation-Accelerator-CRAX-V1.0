@@ -305,13 +305,6 @@ function(fetch_arrow_headers_fallback)
     # Suppress FetchContent_Populate deprecation warning
     cmake_policy(SET CMP0169 OLD)
     
-    FetchContent_Declare(
-        arrow_build
-        URL "https://github.com/apache/arrow/releases/download/apache-arrow-${ARROW_FETCH_VERSION}/apache-arrow-${ARROW_FETCH_VERSION}.tar.gz"
-        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-        SOURCE_SUBDIR cpp
-    )
-    
     # Save current variable states to restore later
     set(SAVED_CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH})
     
@@ -328,6 +321,13 @@ function(fetch_arrow_headers_fallback)
     # Disable problematic Arrow features to avoid Boost conflicts
     set(ARROW_WITH_BOOST OFF CACHE BOOL "Build Arrow with Boost" FORCE)
     set(ARROW_BOOST_USE_SHARED OFF CACHE BOOL "Use shared Boost libraries" FORCE)
+    
+    FetchContent_Declare(
+        arrow_build
+        URL "https://github.com/apache/arrow/releases/download/apache-arrow-${ARROW_FETCH_VERSION}/apache-arrow-${ARROW_FETCH_VERSION}.tar.gz"
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+        SOURCE_SUBDIR cpp
+    )
 
     # Build Arrow
     message(STATUS "  Building minimal Arrow library...")
