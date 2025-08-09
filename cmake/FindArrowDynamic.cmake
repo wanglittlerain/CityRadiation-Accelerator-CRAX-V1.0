@@ -63,6 +63,17 @@ function(setup_arrow_dependency)
         endif()
     endif()
     
+    # Try fetching Arrow headers as final fallback
+    if(NOT arrow_found)
+        fetch_arrow_headers_fallback()
+        if(TARGET Arrow::arrow_shared)
+            set(arrow_found TRUE)
+            set(arrow_source "fetched_headers")
+            message(STATUS "Arrow found via: ${arrow_source}")
+            return()
+        endif()
+    endif()
+    
     # If no Arrow found, create empty target and warn
     message(WARNING "Arrow not found via any method")
     if(NOT TARGET Arrow::arrow_shared)
@@ -278,4 +289,56 @@ function(create_arrow_targets source)
             message(WARNING "Expected Arrow::arrow_shared target not found")
         endif()
     endif()
+endfunction()
+
+# Fetch Arrow headers as final fallback when all other methods fail
+function(fetch_arrow_headers_fallback)    
+    # Include FetchContent if not already available
+    include(FetchContent)
+    
+    # Arrow version to fetch (adjust as needed)
+    set(ARROW_FETCH_VERSION "21.0.0" CACHE STRING "Arrow version to fetch for headers")
+    
+    # Try to fetch Arrow source for headers
+    message(STATUS "  Fetching Arrow ${ARROW_FETCH_VERSION} headers from GitHub...")
+    
+    # Suppress FetchContent_Populate deprecation warning
+    cmake_policy(SET CMP0169 OLD)
+    
+    FetchContent_Declare(
+        arrow_headers
+        URL "https://github.com/apache/arrow/archive/refs/tags/apache-arrow-${ARROW_FETCH_VERSION}.tar.gz"
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    )
+    
+    # Use FetchContent_Populate to avoid building Arrow (we only need headers)
+    FetchContent_GetProperties(arrow_headers)
+    if(NOT arrow_headers_POPULATED)
+        message(STATUS "  Downloading Arrow headers...")
+        FetchContent_Populate(arrow_headers)
+        
+        # Check if the headers were successfully fetched
+        set(ARROW_HEADERS_INCLUDE_DIR "${arrow_headers_SOURCE_DIR}/cpp/src")
+        if(EXISTS "${ARROW_HEADERS_INCLUDE_DIR}/arrow")
+            message(STATUS "  Successfully fetched Arrow headers to: ${ARROW_HEADERS_INCLUDE_DIR}")
+            
+            # Create interface target with headers only
+            add_library(Arrow::arrow_shared INTERFACE IMPORTED GLOBAL)
+            set_target_properties(Arrow::arrow_shared PROPERTIES
+                INTERFACE_INCLUDE_DIRECTORIES "${ARROW_HEADERS_INCLUDE_DIR}"
+                INTERFACE_COMPILE_DEFINITIONS "ARROW_STATIC=0;ARROW_HEADERS_ONLY=1"
+            )
+            
+            message(STATUS "  Created Arrow::arrow_shared target with fetched headers (headers-only mode)")
+            set(ARROW_FOUND TRUE PARENT_SCOPE)
+            set(ARROW_VERSION ${ARROW_FETCH_VERSION} PARENT_SCOPE)
+            return()
+        else()
+            message(WARNING "  Arrow headers directory not found at expected location: ${ARROW_HEADERS_INCLUDE_DIR}")
+        endif()
+    else()
+        message(WARNING "  Failed to fetch Arrow headers")
+    endif()
+    
+    message(STATUS "  Arrow headers fetch fallback failed")
 endfunction()
