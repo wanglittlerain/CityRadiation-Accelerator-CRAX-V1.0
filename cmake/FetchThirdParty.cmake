@@ -63,7 +63,7 @@ function(setup_boost_dependency)
         message(STATUS "Fetching Boost ${BOOST_VERSION} from source...")
         FetchContent_Declare(
             boost
-            URL https://github.com/boostorg/boost/releases/download/boost-${BOOST_VERSION}/boost-${BOOST_VERSION}-b2-nodocs.tar.gz
+            URL https://github.com/boostorg/boost/releases/download/boost-${BOOST_VERSION}/boost-${BOOST_VERSION}-b2-nodocs.tar.xz
         )
         FetchContent_MakeAvailable(boost)
         include_directories(${boost_SOURCE_DIR})
