@@ -312,7 +312,10 @@ function(fetch_arrow_headers_fallback)
         SOURCE_SUBDIR cpp
     )
     
-    # Configure Arrow build options for minimal build
+    # Save current variable states to restore later
+    set(SAVED_CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH})
+    
+    # Configure Arrow build options for minimal build and avoid conflicts
     set(ARROW_BUILD_STATIC ON CACHE BOOL "Build Arrow static libraries" FORCE)
     set(ARROW_BUILD_SHARED ON CACHE BOOL "Build Arrow shared libraries" FORCE)
     set(ARROW_DEPENDENCY_SOURCE BUNDLED CACHE STRING "Arrow dependency source" FORCE)
@@ -321,10 +324,17 @@ function(fetch_arrow_headers_fallback)
     set(ARROW_BUILD_BENCHMARKS OFF CACHE BOOL "Build Arrow benchmarks" FORCE)
     set(ARROW_WITH_LZ4 ON CACHE BOOL "Build Arrow with LZ4 support" FORCE)
     set(ARROW_WITH_ZSTD ON CACHE BOOL "Build Arrow with ZSTD support" FORCE)
+    
+    # Disable problematic Arrow features to avoid Boost conflicts
+    set(ARROW_WITH_BOOST OFF CACHE BOOL "Build Arrow with Boost" FORCE)
+    set(ARROW_BOOST_USE_SHARED OFF CACHE BOOL "Use shared Boost libraries" FORCE)
 
     # Build Arrow
     message(STATUS "  Building minimal Arrow library...")
     FetchContent_MakeAvailable(arrow_build)
+    
+    # Restore original CMAKE_MODULE_PATH to avoid conflicts
+    set(CMAKE_MODULE_PATH ${SAVED_CMAKE_MODULE_PATH})
     
     # Check if Arrow was successfully built
     if(TARGET arrow_shared OR TARGET arrow_static)
