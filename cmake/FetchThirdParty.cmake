@@ -105,9 +105,7 @@ function(setup_eigen_dependency)
         
         FetchContent_Declare(
             eigen
-            GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
-            GIT_TAG ${EIGEN_VERSION}
-            GIT_SHALLOW TRUE
+            URL https://gitlab.com/libeigen/eigen/-/archive/${EIGEN_VERSION}/eigen-${EIGEN_VERSION}.tar.gz
         )
 
         # Use FetchContent_Populate to prevent building of eigen
