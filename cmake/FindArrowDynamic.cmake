@@ -322,6 +322,26 @@ function(fetch_arrow_headers_fallback)
         if(EXISTS "${ARROW_HEADERS_INCLUDE_DIR}/arrow")
             message(STATUS "  Successfully fetched Arrow headers to: ${ARROW_HEADERS_INCLUDE_DIR}")
             
+            # Configure config.h from config.h.cmake template
+            set(ARROW_CONFIG_CMAKE "${ARROW_HEADERS_INCLUDE_DIR}/arrow/util/config.h.cmake")
+            set(ARROW_CONFIG_H "${ARROW_HEADERS_INCLUDE_DIR}/arrow/util/config.h")
+            
+            if(EXISTS "${ARROW_CONFIG_CMAKE}")
+                message(STATUS "  Configuring Arrow config.h from template...")
+                configure_file("${ARROW_CONFIG_CMAKE}" "${ARROW_CONFIG_H}" @ONLY)
+                message(STATUS "  Generated Arrow config.h")
+            else()
+                message(WARNING "  config.h.cmake template not found, creating minimal config.h")
+                file(WRITE "${ARROW_CONFIG_H}" 
+                    "#ifndef ARROW_UTIL_CONFIG_H
+                    #define ARROW_UTIL_CONFIG_H
+                    #define ARROW_VERSION_MAJOR 21
+                    #define ARROW_VERSION_MINOR 0
+                    #define ARROW_VERSION_PATCH 0
+                    #endif
+                    ")
+            endif()
+            
             # Create interface target with headers only
             add_library(Arrow::arrow_shared INTERFACE IMPORTED GLOBAL)
             set_target_properties(Arrow::arrow_shared PROPERTIES
