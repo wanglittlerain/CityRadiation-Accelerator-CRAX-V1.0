@@ -43,8 +43,6 @@ endif(MSVC)
 
 source_group("" FILES ${Code})
 source_group("" FILES ${Head})
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_DEBUG ${CMAKE_SOURCE_DIR}/../libs)
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_RELEASE ${CMAKE_SOURCE_DIR}/../libs)
 add_library(common STATIC ${Code} ${Head})
 
 # Link with modern dependency targets when using automated dependencies

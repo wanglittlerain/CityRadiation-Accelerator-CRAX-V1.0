@@ -4,7 +4,6 @@ source_group("" FILES ${CODELIST})
 if(NOT APPLE)
 	set(CMAKE_EXE_LINKER_FLAGS " -static")
 endif()
-link_directories(${Libs})
 set(LinkLib common)
 
 SET(CMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG ${Bin})

@@ -2,8 +2,6 @@ include_directories(./)
 file(GLOB_RECURSE CODELIST "${PROJECT_SOURCE_DIR}/rad/*.cc" "${PROJECT_SOURCE_DIR}/rad/*.h")
 source_group("" FILES ${CODELIST})
 
-# Link directory setup
-link_directories(${Libs})
 
 # Determine Arrow linking strategy based on configuration
 if(USE_DYNAMIC_ARROW)

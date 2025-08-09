@@ -57,7 +57,6 @@ endif()
 
 set(CMAKE_BUILD_TYPE "Release")
 
-set(Libs ${PROJECT_SOURCE_DIR}/libs)
 set(Bin ${PROJECT_SOURCE_DIR}/bin)
 
 # Build common library first
