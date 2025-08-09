@@ -314,13 +314,14 @@ function(fetch_arrow_headers_fallback)
     
     # Configure Arrow build options for minimal build
     set(ARROW_BUILD_STATIC ON CACHE BOOL "Build Arrow static libraries" FORCE)
-    set(ARROW_BUILD_SHARED OFF CACHE BOOL "Build Arrow shared libraries" FORCE)
+    set(ARROW_BUILD_SHARED ON CACHE BOOL "Build Arrow shared libraries" FORCE)
     set(ARROW_DEPENDENCY_SOURCE BUNDLED CACHE STRING "Arrow dependency source" FORCE)
-    set(ARROW_VERBOSE_THIRDPARTY_BUILD OFF CACHE BOOL "Arrow verbose build" FORCE)
     set(ARROW_BUILD_TESTS OFF CACHE BOOL "Build Arrow tests" FORCE)
     set(ARROW_BUILD_EXAMPLES OFF CACHE BOOL "Build Arrow examples" FORCE)
     set(ARROW_BUILD_BENCHMARKS OFF CACHE BOOL "Build Arrow benchmarks" FORCE)
-    
+    set(ARROW_WITH_LZ4 ON CACHE BOOL "Build Arrow with LZ4 support" FORCE)
+    set(ARROW_WITH_ZSTD ON CACHE BOOL "Build Arrow with ZSTD support" FORCE)
+
     # Build Arrow
     message(STATUS "  Building minimal Arrow library...")
     FetchContent_MakeAvailable(arrow_build)
