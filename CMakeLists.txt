@@ -32,9 +32,12 @@ include_directories(common/include/)
 # Setup Arrow dependency
 setup_arrow_dependency()
 
-if(MSVC AND NOT USE_DYNAMIC_ARROW)
-	# Traditional static Arrow for MSVC (backwards compatibility)
-	include_directories(common/thirdparty/arrow20.0.0)
+if(MSVC)
+	if(NOT USE_DYNAMIC_ARROW)
+		# Traditional static Arrow for MSVC (backwards compatibility)
+		include_directories(common/thirdparty/arrow20.0.0)
+	endif()
+
 	set(CMAKE_CXX_STANDARD "23")
 	set(CMAKE_CONFIGURATION_TYPES "Debug;Release")
 	set(CMAKE_CXX_FLAGS "/Zi /W4 /WX /MP /EHsc /wd4819 /wd4505 /wd4324 /wd4100 /D_WINDOWS /DNOMINMAX /D_SILENCE_CXX23_DENORM_DEPRECATION_WARNING") 
