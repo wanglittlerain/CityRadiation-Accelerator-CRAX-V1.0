@@ -153,9 +153,7 @@ function(setup_nlohmann_json_dependency)
         
         FetchContent_Declare(
             nlohmann_json
-            GIT_REPOSITORY https://github.com/nlohmann/json.git
-            GIT_TAG v${NLOHMANN_JSON_VERSION}
-            GIT_SHALLOW TRUE
+            URL https://github.com/nlohmann/json/releases/download/v${NLOHMANN_JSON_VERSION}/json.tar.xz 
         )
         
         set(JSON_BuildTests OFF CACHE INTERNAL "")
