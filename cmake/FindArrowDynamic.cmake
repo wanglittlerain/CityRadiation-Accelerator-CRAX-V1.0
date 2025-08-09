@@ -302,59 +302,49 @@ function(fetch_arrow_headers_fallback)
     # Try to fetch Arrow source for headers
     message(STATUS "  Fetching Arrow ${ARROW_FETCH_VERSION} headers from GitHub...")
     
-    # Suppress FetchContent_Populate deprecation warning
-    cmake_policy(SET CMP0169 OLD)
+    # Use ExternalProject for better isolation
+    include(ExternalProject)
     
-    # Save current variable states to restore later
-    set(SAVED_CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH})
+    set(ARROW_INSTALL_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/arrow-install")
     
-    # Configure Arrow build options for minimal build and avoid conflicts
-    set(ARROW_BUILD_STATIC ON CACHE BOOL "Build Arrow static libraries" FORCE)
-    set(ARROW_BUILD_SHARED ON CACHE BOOL "Build Arrow shared libraries" FORCE)
-    set(ARROW_DEPENDENCY_SOURCE BUNDLED CACHE STRING "Arrow dependency source" FORCE)
-    set(ARROW_BUILD_TESTS OFF CACHE BOOL "Build Arrow tests" FORCE)
-    set(ARROW_BUILD_EXAMPLES OFF CACHE BOOL "Build Arrow examples" FORCE)
-    set(ARROW_BUILD_BENCHMARKS OFF CACHE BOOL "Build Arrow benchmarks" FORCE)
-    set(ARROW_WITH_LZ4 ON CACHE BOOL "Build Arrow with LZ4 support" FORCE)
-    set(ARROW_WITH_ZSTD ON CACHE BOOL "Build Arrow with ZSTD support" FORCE)
-    
-    # Disable problematic Arrow features to avoid Boost conflicts
-    set(ARROW_WITH_BOOST OFF CACHE BOOL "Build Arrow with Boost" FORCE)
-    set(ARROW_BOOST_USE_SHARED OFF CACHE BOOL "Use shared Boost libraries" FORCE)
-    
-    FetchContent_Declare(
-        arrow_build
+    # Build Arrow as external project with complete isolation
+    message(STATUS "  Building Arrow as isolated external project...")
+    ExternalProject_Add(
+        arrow_external
         URL "https://github.com/apache/arrow/releases/download/apache-arrow-${ARROW_FETCH_VERSION}/apache-arrow-${ARROW_FETCH_VERSION}.tar.gz"
-        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
         SOURCE_SUBDIR cpp
+        CMAKE_ARGS
+            -DCMAKE_INSTALL_PREFIX=${ARROW_INSTALL_PREFIX}
+            -DCMAKE_BUILD_TYPE=Release
+            -DARROW_BUILD_STATIC=ON
+            -DARROW_BUILD_SHARED=ON
+            -DARROW_BUILD_TESTS=OFF
+            -DARROW_BUILD_EXAMPLES=OFF
+            -DARROW_BUILD_BENCHMARKS=OFF
+            -DARROW_WITH_BOOST=OFF
+            -DARROW_DEPENDENCY_SOURCE=BUNDLED
+            -DARROW_VERBOSE_THIRDPARTY_BUILD=OFF
+        BUILD_ALWAYS FALSE
+        INSTALL_DIR ${ARROW_INSTALL_PREFIX}
     )
-
-    # Build Arrow
-    message(STATUS "  Building minimal Arrow library...")
-    FetchContent_MakeAvailable(arrow_build)
     
-    # Restore original CMAKE_MODULE_PATH to avoid conflicts
-    set(CMAKE_MODULE_PATH ${SAVED_CMAKE_MODULE_PATH})
+    # Wait for build to complete
+    ExternalProject_Get_Property(arrow_external install_dir)
     
-    # Check if Arrow was successfully built
-    if(TARGET arrow_shared OR TARGET arrow_static)
-        message(STATUS "  Successfully built Arrow library")
-        
-        # Prefer shared if available, otherwise use static
-        if(TARGET arrow_shared)
-            add_library(Arrow::arrow_shared ALIAS arrow_shared)
-            message(STATUS "  Using Arrow shared library")
-        elseif(TARGET arrow_static)
-            add_library(Arrow::arrow_shared ALIAS arrow_static)  
-            message(STATUS "  Using Arrow static library")
-        endif()
-        
-        set(ARROW_FOUND TRUE PARENT_SCOPE)
-        set(ARROW_VERSION ${ARROW_FETCH_VERSION} PARENT_SCOPE)
-        return()
-    else()
-        message(WARNING "  Arrow build completed but expected targets not found")
-    endif()
+    # Create imported target after build
+    add_library(Arrow::arrow_shared SHARED IMPORTED GLOBAL)
+    set_target_properties(Arrow::arrow_shared PROPERTIES
+        IMPORTED_LOCATION "${install_dir}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}arrow${CMAKE_SHARED_LIBRARY_SUFFIX}"
+        INTERFACE_INCLUDE_DIRECTORIES "${install_dir}/include"
+    )
+    
+    # Make sure Arrow is built before our target
+    add_dependencies(Arrow::arrow_shared arrow_external)
+    
+    message(STATUS "  Arrow external build configured")
+    set(ARROW_FOUND TRUE PARENT_SCOPE)
+    set(ARROW_VERSION ${ARROW_FETCH_VERSION} PARENT_SCOPE)
+    return()
     
     message(STATUS "  Arrow headers fetch fallback failed")
 endfunction()
