@@ -306,58 +306,43 @@ function(fetch_arrow_headers_fallback)
     cmake_policy(SET CMP0169 OLD)
     
     FetchContent_Declare(
-        arrow_headers
+        arrow_build
         URL "https://github.com/apache/arrow/releases/download/apache-arrow-${ARROW_FETCH_VERSION}/apache-arrow-${ARROW_FETCH_VERSION}.tar.gz"
         DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+        SOURCE_SUBDIR cpp
     )
     
-    # Use FetchContent_Populate to avoid building Arrow (we only need headers)
-    FetchContent_GetProperties(arrow_headers)
-    if(NOT arrow_headers_POPULATED)
-        message(STATUS "  Downloading Arrow headers...")
-        FetchContent_Populate(arrow_headers)
+    # Configure Arrow build options for minimal build
+    set(ARROW_BUILD_STATIC ON CACHE BOOL "Build Arrow static libraries" FORCE)
+    set(ARROW_BUILD_SHARED OFF CACHE BOOL "Build Arrow shared libraries" FORCE)
+    set(ARROW_DEPENDENCY_SOURCE BUNDLED CACHE STRING "Arrow dependency source" FORCE)
+    set(ARROW_VERBOSE_THIRDPARTY_BUILD OFF CACHE BOOL "Arrow verbose build" FORCE)
+    set(ARROW_BUILD_TESTS OFF CACHE BOOL "Build Arrow tests" FORCE)
+    set(ARROW_BUILD_EXAMPLES OFF CACHE BOOL "Build Arrow examples" FORCE)
+    set(ARROW_BUILD_BENCHMARKS OFF CACHE BOOL "Build Arrow benchmarks" FORCE)
+    
+    # Build Arrow
+    message(STATUS "  Building minimal Arrow library...")
+    FetchContent_MakeAvailable(arrow_build)
+    
+    # Check if Arrow was successfully built
+    if(TARGET arrow_shared OR TARGET arrow_static)
+        message(STATUS "  Successfully built Arrow library")
         
-        # Check if the headers were successfully fetched
-        set(ARROW_HEADERS_INCLUDE_DIR "${arrow_headers_SOURCE_DIR}/cpp/src")
-        if(EXISTS "${ARROW_HEADERS_INCLUDE_DIR}/arrow")
-            message(STATUS "  Successfully fetched Arrow headers to: ${ARROW_HEADERS_INCLUDE_DIR}")
-            
-            # Configure config.h from config.h.cmake template
-            set(ARROW_CONFIG_CMAKE "${ARROW_HEADERS_INCLUDE_DIR}/arrow/util/config.h.cmake")
-            set(ARROW_CONFIG_H "${ARROW_HEADERS_INCLUDE_DIR}/arrow/util/config.h")
-            
-            if(EXISTS "${ARROW_CONFIG_CMAKE}")
-                message(STATUS "  Configuring Arrow config.h from template...")
-                configure_file("${ARROW_CONFIG_CMAKE}" "${ARROW_CONFIG_H}" @ONLY)
-                message(STATUS "  Generated Arrow config.h")
-            else()
-                message(WARNING "  config.h.cmake template not found, creating minimal config.h")
-                file(WRITE "${ARROW_CONFIG_H}" 
-                    "#ifndef ARROW_UTIL_CONFIG_H
-                    #define ARROW_UTIL_CONFIG_H
-                    #define ARROW_VERSION_MAJOR 21
-                    #define ARROW_VERSION_MINOR 0
-                    #define ARROW_VERSION_PATCH 0
-                    #endif
-                    ")
-            endif()
-            
-            # Create interface target with headers only
-            add_library(Arrow::arrow_shared INTERFACE IMPORTED GLOBAL)
-            set_target_properties(Arrow::arrow_shared PROPERTIES
-                INTERFACE_INCLUDE_DIRECTORIES "${ARROW_HEADERS_INCLUDE_DIR}"
-                INTERFACE_COMPILE_DEFINITIONS "ARROW_STATIC=0;ARROW_HEADERS_ONLY=1"
-            )
-            
-            message(STATUS "  Created Arrow::arrow_shared target with fetched headers (headers-only mode)")
-            set(ARROW_FOUND TRUE PARENT_SCOPE)
-            set(ARROW_VERSION ${ARROW_FETCH_VERSION} PARENT_SCOPE)
-            return()
-        else()
-            message(WARNING "  Arrow headers directory not found at expected location: ${ARROW_HEADERS_INCLUDE_DIR}")
+        # Prefer shared if available, otherwise use static
+        if(TARGET arrow_shared)
+            add_library(Arrow::arrow_shared ALIAS arrow_shared)
+            message(STATUS "  Using Arrow shared library")
+        elseif(TARGET arrow_static)
+            add_library(Arrow::arrow_shared ALIAS arrow_static)  
+            message(STATUS "  Using Arrow static library")
         endif()
+        
+        set(ARROW_FOUND TRUE PARENT_SCOPE)
+        set(ARROW_VERSION ${ARROW_FETCH_VERSION} PARENT_SCOPE)
+        return()
     else()
-        message(WARNING "  Failed to fetch Arrow headers")
+        message(WARNING "  Arrow build completed but expected targets not found")
     endif()
     
     message(STATUS "  Arrow headers fetch fallback failed")
