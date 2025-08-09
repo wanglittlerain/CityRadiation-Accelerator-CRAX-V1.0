@@ -307,7 +307,7 @@ function(fetch_arrow_headers_fallback)
     
     FetchContent_Declare(
         arrow_headers
-        URL "https://github.com/apache/arrow/archive/refs/tags/apache-arrow-${ARROW_FETCH_VERSION}.tar.gz"
+        URL "https://github.com/apache/arrow/releases/download/apache-arrow-${ARROW_FETCH_VERSION}/apache-arrow-${ARROW_FETCH_VERSION}.tar.gz"
         DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     )
     
