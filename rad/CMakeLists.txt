@@ -1,25 +1,36 @@
 include_directories(./)
 file(GLOB_RECURSE CODELIST "${PROJECT_SOURCE_DIR}/rad/*.cc" "${PROJECT_SOURCE_DIR}/rad/*.h")
 source_group("" FILES ${CODELIST})
-#set(CMAKE_EXE_LINKER_FLAGS " -static")
-#link_directories(${Libs})
-#set(LinkLib common)
-if(MSVC)
-	link_directories(${Libs})
+
+# Link directory setup
+link_directories(${Libs})
+
+# Determine Arrow linking strategy based on configuration
+if(USE_DYNAMIC_ARROW)
+	message(STATUS "Using dynamic Arrow linking for radiation target")
+	if(TARGET Arrow::arrow_shared)
+		set(LinkLib PRIVATE Arrow::arrow_shared common)
+		message(STATUS "  Linking with Arrow::arrow_shared")
+	else()
+		message(WARNING "  Dynamic Arrow requested but Arrow::arrow_shared target not available")
+		set(LinkLib PRIVATE common)
+	endif()
+elseif(MSVC)
+	# Traditional static Arrow linking for MSVC
+	message(STATUS "Using static Arrow linking for MSVC radiation target")
 	set(LinkLib PRIVATE arrow common)
 else()
-	# For Unix-like systems (Linux, macOS)
-	# Try to find Arrow via pkg-config or cmake
+	# Traditional Unix behavior - try to find Arrow, fallback gracefully
+	message(STATUS "Using traditional Arrow detection for Unix radiation target")
 	find_package(Arrow QUIET)
 	if(Arrow_FOUND)
 		set(LinkLib PRIVATE Arrow::arrow_shared common)
+		message(STATUS "  Found system Arrow, linking dynamically")
 	else()
-		# Fallback for systems without Arrow installed
-		message(WARNING "Arrow not found via find_package, linking without Arrow")
+		message(WARNING "  Arrow not found via find_package, linking without Arrow")
 		set(LinkLib PRIVATE common)
 	endif()
-	link_directories(${Libs})
-endif(MSVC)
+endif()
 
 SET(CMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG ${Bin})
 SET(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE ${Bin})

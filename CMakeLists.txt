@@ -1,12 +1,39 @@
 cmake_minimum_required (VERSION 3.27.2)
 project(crax)
-include_directories(
-	common/include/
-	common/thirdparty/nlohmann3.11.3/
-	common/thirdparty/boost_1_87_0/
-	common/thirdparty/eigen/
-)
-if(MSVC)
+
+# Add cmake module path
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
+# Include new dependency management modules
+include(FetchThirdParty)
+include(FindArrowDynamic)
+
+# Options for dependency management (defaults maintain backwards compatibility)
+option(USE_AUTOMATED_DEPENDENCIES "Use automated dependency fetching instead of static folder" OFF)
+option(USE_DYNAMIC_ARROW "Use dynamic Arrow linking (via system or pyarrow)" OFF)
+option(PREFER_PYARROW "Prefer pyarrow installation over system Arrow" ON)
+
+# Setup dependencies based on options
+if(USE_AUTOMATED_DEPENDENCIES)
+    message(STATUS "Using automated dependency management")
+    setup_third_party_dependencies()
+else()
+    message(STATUS "Using static dependency folder 'thirdparty'")
+    include_directories(
+        common/include/
+        common/thirdparty/nlohmann3.11.3/
+        common/thirdparty/boost_1_87_0/
+        common/thirdparty/eigen/
+    )
+endif()
+
+# Always include common headers
+include_directories(common/include/)
+# Setup Arrow dependency
+setup_arrow_dependency()
+
+if(MSVC AND NOT USE_DYNAMIC_ARROW)
+	# Traditional static Arrow for MSVC (backwards compatibility)
 	include_directories(common/thirdparty/arrow20.0.0)
 	set(CMAKE_CXX_STANDARD "23")
 	set(CMAKE_CONFIGURATION_TYPES "Debug;Release")
@@ -26,7 +53,7 @@ elseif(APPLE)
 else()
 	set(CMAKE_CXX_FLAGS_DEBUG "-Og -Wall -Wextra -Werror -Wfatal-errors -std=c++2a -ggdb -D_DEBUG")
 	set(CMAKE_CXX_FLAGS_RELEASE "-O3 -g -Wall -Wextra -Werror -Wfatal-errors -std=c++2a -fopenmp")
-endif(MSVC)
+endif()
 
 set(CMAKE_BUILD_TYPE "Release")
 

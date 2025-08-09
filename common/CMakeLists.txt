@@ -1,12 +1,20 @@
 cmake_minimum_required (VERSION 3.27.2)
 project (common)
+
+# Always include common headers
 include_directories(
 	./
 	./include
-	./thirdparty/nlohmann3.11.3/
-	./thirdparty/boost_1_87_0/
-	./thirdparty/eigen/
 )
+
+# Additional include directories for backwards compatibility
+if(NOT USE_AUTOMATED_DEPENDENCIES)
+	include_directories(
+		./thirdparty/nlohmann3.11.3/
+		./thirdparty/boost_1_87_0/
+		./thirdparty/eigen/
+	)
+endif()
 
 set(include "${PROJECT_SOURCE_DIR}/include/")
 set(src "${PROJECT_SOURCE_DIR}/src/")
@@ -38,3 +46,17 @@ source_group("" FILES ${Head})
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_DEBUG ${CMAKE_SOURCE_DIR}/../libs)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_RELEASE ${CMAKE_SOURCE_DIR}/../libs)
 add_library(common STATIC ${Code} ${Head})
+
+# Link with modern dependency targets when using automated dependencies
+if(USE_AUTOMATED_DEPENDENCIES)
+	# Link common library with third-party targets
+	if(TARGET Boost::headers)
+		target_link_libraries(common PUBLIC Boost::headers)
+	endif()
+	if(TARGET Eigen3::Eigen)
+		target_link_libraries(common PUBLIC Eigen3::Eigen)
+	endif()
+	if(TARGET nlohmann_json::nlohmann_json)
+		target_link_libraries(common PUBLIC nlohmann_json::nlohmann_json)
+	endif()
+endif()
