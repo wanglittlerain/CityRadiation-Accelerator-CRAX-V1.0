@@ -100,6 +100,9 @@ function(setup_eigen_dependency)
     if(NOT eigen_found)
         message(STATUS "Fetching Eigen ${EIGEN_VERSION} from source...")
         
+        # Suppress FetchContent_Populate deprecation warning
+        cmake_policy(SET CMP0169 OLD)
+        
         FetchContent_Declare(
             eigen
             GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
