@@ -106,10 +106,11 @@ function(setup_eigen_dependency)
             GIT_TAG ${EIGEN_VERSION}
             GIT_SHALLOW TRUE
         )
-        
-        FetchContent_MakeAvailable(eigen)
-        # Create interface library for fetched Eigen
-        if(NOT TARGET Eigen3::Eigen)
+
+        # Use FetchContent_Populate to prevent building of eigen
+        FetchContent_GetProperties(eigen)
+        if(NOT eigen_POPULATED)
+            FetchContent_Populate(eigen)
             add_library(Eigen3::Eigen INTERFACE IMPORTED GLOBAL)
             target_include_directories(Eigen3::Eigen INTERFACE "${eigen_SOURCE_DIR}")
         endif()
