@@ -311,6 +311,7 @@ function(fetch_arrow_headers_fallback)
     file(MAKE_DIRECTORY "${ARROW_INSTALL_PREFIX}")
     file(MAKE_DIRECTORY "${ARROW_INSTALL_PREFIX}/include")
     file(MAKE_DIRECTORY "${ARROW_INSTALL_PREFIX}/lib")
+    file(MAKE_DIRECTORY "${ARROW_INSTALL_PREFIX}/bin")
     
     # Build Arrow as external project with complete isolation
     message(STATUS "  Building Arrow as isolated external project...")
@@ -335,11 +336,24 @@ function(fetch_arrow_headers_fallback)
     
     # Create imported target with pre-created directories
     add_library(Arrow::arrow_shared SHARED IMPORTED GLOBAL)
-    set_target_properties(Arrow::arrow_shared PROPERTIES
-        IMPORTED_LOCATION "${ARROW_INSTALL_PREFIX}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}arrow${CMAKE_SHARED_LIBRARY_SUFFIX}"
-        INTERFACE_INCLUDE_DIRECTORIES "${ARROW_INSTALL_PREFIX}/include"
-        INTERFACE_COMPILE_DEFINITIONS "ARROW_STATIC=0"
-    )
+    
+    # Set platform-specific library properties
+    if(WIN32)
+        # Windows needs both DLL location and import library
+        set_target_properties(Arrow::arrow_shared PROPERTIES
+            IMPORTED_LOCATION "${ARROW_INSTALL_PREFIX}/bin/arrow.dll"
+            IMPORTED_IMPLIB "${ARROW_INSTALL_PREFIX}/lib/arrow.lib"
+            INTERFACE_INCLUDE_DIRECTORIES "${ARROW_INSTALL_PREFIX}/include"
+            INTERFACE_COMPILE_DEFINITIONS "ARROW_STATIC=0"
+        )
+    else()
+        # Unix-like systems
+        set_target_properties(Arrow::arrow_shared PROPERTIES
+            IMPORTED_LOCATION "${ARROW_INSTALL_PREFIX}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}arrow${CMAKE_SHARED_LIBRARY_SUFFIX}"
+            INTERFACE_INCLUDE_DIRECTORIES "${ARROW_INSTALL_PREFIX}/include"
+            INTERFACE_COMPILE_DEFINITIONS "ARROW_STATIC=0"
+        )
+    endif()
     
     # Make sure Arrow is built before any target that uses it
     add_dependencies(Arrow::arrow_shared arrow_external)
