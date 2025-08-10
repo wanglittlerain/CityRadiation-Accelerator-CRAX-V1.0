@@ -6,11 +6,9 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 # Include new dependency management modules
 include(FetchThirdParty)
-include(FindArrowDynamic)
 
 # Options for dependency management (defaults maintain backwards compatibility)
 option(USE_AUTOMATED_DEPENDENCIES "Use automated dependency fetching instead of static folder" OFF)
-option(USE_DYNAMIC_ARROW "Use dynamic Arrow linking (via system or pyarrow)" OFF)
 
 # Setup dependencies based on options
 if(USE_AUTOMATED_DEPENDENCIES)
@@ -28,15 +26,8 @@ endif()
 
 # Always include common headers
 include_directories(common/include/)
-# Setup Arrow dependency
-setup_arrow_dependency()
 
 if(MSVC)
-	if(NOT USE_DYNAMIC_ARROW)
-		# Traditional static Arrow for MSVC (backwards compatibility)
-		include_directories(common/thirdparty/arrow20.0.0)
-	endif()
-
 	set(CMAKE_CXX_STANDARD "23")
 	set(CMAKE_CONFIGURATION_TYPES "Debug;Release")
 	set(CMAKE_CXX_FLAGS "/Zi /W4 /WX /MP /EHsc /wd4819 /wd4505 /wd4324 /wd4100 /D_WINDOWS /DNOMINMAX /D_SILENCE_CXX23_DENORM_DEPRECATION_WARNING") 
@@ -59,6 +50,7 @@ endif()
 
 set(CMAKE_BUILD_TYPE "Release")
 
+# Set bin output directory
 set(Bin ${PROJECT_SOURCE_DIR}/bin)
 
 # Build common library first

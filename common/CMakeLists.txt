@@ -1,6 +1,8 @@
 cmake_minimum_required (VERSION 3.27.2)
 project (common)
 
+option(USE_DYNAMIC_ARROW "Use dynamic Arrow linking (via system or pyarrow)" OFF)
+
 # Always include common headers
 include_directories(
 	./
@@ -57,4 +59,25 @@ if(USE_AUTOMATED_DEPENDENCIES)
 	if(TARGET nlohmann_json::nlohmann_json)
 		target_link_libraries(common PUBLIC nlohmann_json::nlohmann_json)
 	endif()
+endif()
+
+# 1. Try local static Arrow first
+if(EXISTS "./thirdparty/arrow20.0.0")
+    include_directories(./thirdparty/arrow20.0.0)
+    target_link_libraries(common PUBLIC arrow)
+    message(STATUS "Found local Arrow: Linking with local static Arrow")
+elseif(USE_DYNAMIC_ARROW)
+    # 2. Try dynamic Arrow if requested
+	include(FindArrowDynamic)
+	
+    find_package(Arrow QUIET)
+    if(TARGET Arrow::arrow_shared)
+        target_link_libraries(common PUBLIC Arrow::arrow_shared)
+        message(STATUS "Linking with Arrow::arrow_shared")
+    else()
+        message(WARNING "Dynamic Arrow requested but not found, linking without Arrow")
+    endif()
+else()
+    # 3. No Arrow
+    message(WARNING "No Arrow linked")
 endif()
