@@ -18,8 +18,18 @@ elseif(USE_DYNAMIC_ARROW)
     find_package(Arrow QUIET)
     if(TARGET Arrow::arrow_shared)
         set(ARROW_LIBS Arrow::arrow_shared)
-		get_target_property(_arrow_location Arrow::arrow_shared LOCATION)
-        message(STATUS "Linking radiation with Arrow::arrow_shared: ${_arrow_location}")
+        get_target_property(ARROW_LOCATION Arrow::arrow_shared IMPORTED_LOCATION)
+
+        # Add RPATH for dynamic Arrow
+        if(ARROW_LOCATION)
+            get_filename_component(ARROW_LIB_DIR ${ARROW_LOCATION} DIRECTORY)
+            set_target_properties(radiation PROPERTIES
+                BUILD_RPATH "${ARROW_LIB_DIR}"
+                INSTALL_RPATH "${ARROW_LIB_DIR}"
+            )
+            message(STATUS "RPATH set for radiation: ${ARROW_LIB_DIR}")
+        endif()
+        message(STATUS "Linking radiation with Arrow::arrow_shared: ${ARROW_LOCATION}")
     else()
         message(WARNING "Dynamic Arrow requested but not found, linking radiation without Arrow")
         set(ARROW_LIBS "")
