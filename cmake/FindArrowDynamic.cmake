@@ -314,42 +314,31 @@ function(fetch_arrow_headers_fallback)
         set(BUILD_BYPRODUCTS ${ARROW_LIB_PATH})
     endif()
 
-    # Prepare CMAKE_ARGS with platform-specific settings
-    set(ARROW_CMAKE_ARGS
-        -DCMAKE_INSTALL_PREFIX=${ARROW_INSTALL_DIR}
-        -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
-        -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
-        -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-        -DARROW_BUILD_SHARED=ON
-        -DARROW_BUILD_STATIC=OFF
-        -DARROW_BUILD_TESTS=OFF
-        -DARROW_BUILD_BENCHMARKS=OFF
-        -DARROW_BUILD_UTILITIES=OFF
-        -DARROW_BUILD_INTEGRATION=OFF
-        -DARROW_BUILD_EXAMPLES=OFF
-        -DARROW_PARQUET=OFF
-        -DARROW_CSV=OFF
-        -DARROW_JSON=OFF
-        -DARROW_FILESYSTEM=OFF
-        -DARROW_SIMD_LEVEL=NONE
-        -DCMAKE_POSITION_INDEPENDENT_CODE=ON
-        -DARROW_DEPENDENCY_SOURCE=BUNDLED
-    )
-    
-    # Add Windows-specific CMake policies to handle CMake 4.x compatibility issues
-    if(WIN32)
-        list(APPEND ARROW_CMAKE_ARGS
-            -DCMAKE_POLICY_DEFAULT_CMP0077=NEW
-            -DCMAKE_POLICY_DEFAULT_CMP0135=NEW
-            -DCMAKE_POLICY_DEFAULT_CMP0091=NEW
-        )
-    endif()
-
     ExternalProject_Add(arrow_ep
         URL https://github.com/apache/arrow/releases/download/apache-arrow-${ARROW_VERSION}/apache-arrow-${ARROW_VERSION}.tar.gz
         SOURCE_SUBDIR cpp
         BINARY_DIR ${ARROW_BINARY_DIR}
-        CMAKE_ARGS ${ARROW_CMAKE_ARGS}
+        CMAKE_ARGS
+            -DCMAKE_INSTALL_PREFIX=${ARROW_INSTALL_DIR}
+            -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+            -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
+            -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+            -DCMAKE_POLICY_DEFAULT_CMP0077=NEW
+            -DCMAKE_POLICY_DEFAULT_CMP0135=NEW
+            -DARROW_BUILD_SHARED=ON
+            -DARROW_BUILD_STATIC=OFF
+            -DARROW_BUILD_TESTS=OFF
+            -DARROW_BUILD_BENCHMARKS=OFF
+            -DARROW_BUILD_UTILITIES=OFF
+            -DARROW_BUILD_INTEGRATION=OFF
+            -DARROW_BUILD_EXAMPLES=OFF
+            -DARROW_PARQUET=OFF
+            -DARROW_CSV=OFF
+            -DARROW_JSON=OFF
+            -DARROW_FILESYSTEM=OFF
+            -DARROW_SIMD_LEVEL=NONE
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+            -DARROW_DEPENDENCY_SOURCE=BUNDLED
         UPDATE_DISCONNECTED YES
         BUILD_BYPRODUCTS ${BUILD_BYPRODUCTS}
     )
