@@ -18,7 +18,7 @@ elseif(USE_DYNAMIC_ARROW)
     find_package(Arrow QUIET)
     if(TARGET Arrow::arrow_shared)
         set(ARROW_LIBS Arrow::arrow_shared)
-        get_target_property(ARROW_LOCATION Arrow::arrow_shared IMPORTED_LOCATION)
+        get_target_property(ARROW_LOCATION Arrow::arrow_shared LOCATION)
 
         # Add RPATH for dynamic Arrow
         if(ARROW_LOCATION)
