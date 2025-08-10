@@ -320,7 +320,7 @@ function(fetch_arrow_headers_fallback)
         BINARY_DIR ${ARROW_BINARY_DIR}
         CMAKE_ARGS
             -DCMAKE_INSTALL_PREFIX=${ARROW_INSTALL_DIR}
-            -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+            -DCMAKE_BUILD_TYPE=Release
             -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
             -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
             -DARROW_BUILD_SHARED=ON
