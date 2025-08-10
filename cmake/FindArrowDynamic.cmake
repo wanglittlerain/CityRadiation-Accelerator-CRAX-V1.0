@@ -291,77 +291,93 @@ function(create_arrow_targets source)
     endif()
 endfunction()
 
-# Fetch Arrow headers as final fallback when all other methods fail
-function(fetch_arrow_headers_fallback)    
-    # Include FetchContent if not already available
-    include(FetchContent)
-    
-    # Arrow version to fetch (adjust as needed)
-    set(ARROW_FETCH_VERSION "21.0.0" CACHE STRING "Arrow version to fetch for headers")
-    
-    # Try to fetch Arrow source for headers
-    message(STATUS "  Fetching Arrow ${ARROW_FETCH_VERSION} headers from GitHub...")
-    
-    # Use ExternalProject for better isolation
+# Build minimal Arrow as final fallback when all other methods fail
+function(fetch_arrow_headers_fallback)
+    message(STATUS "Building minimal Arrow as fallback...")
     include(ExternalProject)
-    
-    set(ARROW_INSTALL_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/arrow-install")
-    
-    # Create install directories to avoid path errors
-    file(MAKE_DIRECTORY "${ARROW_INSTALL_PREFIX}")
-    file(MAKE_DIRECTORY "${ARROW_INSTALL_PREFIX}/include")
-    file(MAKE_DIRECTORY "${ARROW_INSTALL_PREFIX}/lib")
-    file(MAKE_DIRECTORY "${ARROW_INSTALL_PREFIX}/bin")
-    
-    # Build Arrow as external project with complete isolation
-    message(STATUS "  Building Arrow as isolated external project...")
-    ExternalProject_Add(
-        arrow_external
-        URL "https://github.com/apache/arrow/releases/download/apache-arrow-${ARROW_FETCH_VERSION}/apache-arrow-${ARROW_FETCH_VERSION}.tar.gz"
+
+    set(ARROW_VERSION 21.0.0)
+    set(ARROW_BINARY_DIR ${CMAKE_BINARY_DIR}/_deps/arrow-build)
+    set(ARROW_INSTALL_DIR ${CMAKE_BINARY_DIR}/_deps/arrow-install)
+    file(MAKE_DIRECTORY ${ARROW_INSTALL_DIR}/include)
+
+    # Define platform-specific library names and paths
+    if(WIN32)
+        set(ARROW_LIB_NAME "arrow.dll")
+        set(ARROW_IMPLIB_NAME "arrow.lib")
+        set(ARROW_LIB_PATH ${ARROW_INSTALL_DIR}/bin/${ARROW_LIB_NAME})
+        set(ARROW_IMPLIB_PATH ${ARROW_INSTALL_DIR}/lib/${ARROW_IMPLIB_NAME})
+        set(BUILD_BYPRODUCTS ${ARROW_LIB_PATH} ${ARROW_IMPLIB_PATH})
+    else()
+        set(ARROW_LIB_NAME ${CMAKE_SHARED_LIBRARY_PREFIX}arrow${CMAKE_SHARED_LIBRARY_SUFFIX})
+        set(ARROW_LIB_PATH ${ARROW_INSTALL_DIR}/lib/${ARROW_LIB_NAME})
+        set(BUILD_BYPRODUCTS ${ARROW_LIB_PATH})
+    endif()
+
+    ExternalProject_Add(arrow_ep
+        URL https://github.com/apache/arrow/releases/download/apache-arrow-${ARROW_VERSION}/apache-arrow-${ARROW_VERSION}.tar.gz
         SOURCE_SUBDIR cpp
+        BINARY_DIR ${ARROW_BINARY_DIR}
         CMAKE_ARGS
-            -DCMAKE_INSTALL_PREFIX=${ARROW_INSTALL_PREFIX}
-            -DCMAKE_BUILD_TYPE=Release
-            -DARROW_BUILD_STATIC=OFF
+            -DCMAKE_INSTALL_PREFIX=${ARROW_INSTALL_DIR}
+            -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+            -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
+            -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
             -DARROW_BUILD_SHARED=ON
+            -DARROW_BUILD_STATIC=OFF
             -DARROW_BUILD_TESTS=OFF
-            -DARROW_BUILD_EXAMPLES=OFF
             -DARROW_BUILD_BENCHMARKS=OFF
-            -DARROW_WITH_BOOST=OFF
+            -DARROW_BUILD_UTILITIES=OFF
+            -DARROW_BUILD_INTEGRATION=OFF
+            -DARROW_BUILD_EXAMPLES=OFF
+            -DARROW_PARQUET=OFF
+            -DARROW_CSV=OFF
+            -DARROW_JSON=OFF
+            -DARROW_FILESYSTEM=OFF
+            -DARROW_SIMD_LEVEL=NONE
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON
             -DARROW_DEPENDENCY_SOURCE=BUNDLED
-            -DARROW_VERBOSE_THIRDPARTY_BUILD=OFF
-        BUILD_ALWAYS FALSE
-        INSTALL_DIR ${ARROW_INSTALL_PREFIX}
+        UPDATE_DISCONNECTED YES
+        BUILD_BYPRODUCTS ${BUILD_BYPRODUCTS}
     )
     
-    # Create imported target with pre-created directories
+    # Create the bin directory for Windows DLL placement
+    if(WIN32)
+        ExternalProject_Add_Step(arrow_ep create_bin_dir
+            COMMAND ${CMAKE_COMMAND} -E make_directory ${ARROW_INSTALL_DIR}/bin
+            DEPENDEES download
+            DEPENDERS configure
+        )
+    endif()
+    
+    # Create the imported target for out-of-source build
     add_library(Arrow::arrow_shared SHARED IMPORTED GLOBAL)
     
-    # Set platform-specific library properties
+    # Set platform-specific properties
     if(WIN32)
-        # Windows needs both DLL location and import library
+        # Windows: Set both DLL location and import library
         set_target_properties(Arrow::arrow_shared PROPERTIES
-            IMPORTED_LOCATION "${ARROW_INSTALL_PREFIX}/bin/arrow.dll"
-            IMPORTED_IMPLIB "${ARROW_INSTALL_PREFIX}/lib/arrow.lib"
-            INTERFACE_INCLUDE_DIRECTORIES "${ARROW_INSTALL_PREFIX}/include"
+            IMPORTED_LOCATION "${ARROW_LIB_PATH}"
+            IMPORTED_IMPLIB "${ARROW_IMPLIB_PATH}"
+            INTERFACE_INCLUDE_DIRECTORIES "${ARROW_INSTALL_DIR}/include"
             INTERFACE_COMPILE_DEFINITIONS "ARROW_STATIC=0"
         )
     else()
-        # Unix-like systems
+        # Unix-like systems: Set shared library location
         set_target_properties(Arrow::arrow_shared PROPERTIES
-            IMPORTED_LOCATION "${ARROW_INSTALL_PREFIX}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}arrow${CMAKE_SHARED_LIBRARY_SUFFIX}"
-            INTERFACE_INCLUDE_DIRECTORIES "${ARROW_INSTALL_PREFIX}/include"
+            IMPORTED_LOCATION "${ARROW_LIB_PATH}"
+            INTERFACE_INCLUDE_DIRECTORIES "${ARROW_INSTALL_DIR}/include"
             INTERFACE_COMPILE_DEFINITIONS "ARROW_STATIC=0"
         )
     endif()
     
-    # Make sure Arrow is built before any target that uses it
-    add_dependencies(Arrow::arrow_shared arrow_external)
+    # Make sure the target depends on the external project
+    add_dependencies(Arrow::arrow_shared arrow_ep)
     
-    message(STATUS "  Arrow external build configured")
+    # Set parent scope variables for compatibility
     set(ARROW_FOUND TRUE PARENT_SCOPE)
-    set(ARROW_VERSION ${ARROW_FETCH_VERSION} PARENT_SCOPE)
-    return()
+    set(ARROW_VERSION ${ARROW_VERSION} PARENT_SCOPE)
+    set(ARROW_INCLUDE_DIR ${ARROW_INSTALL_DIR}/include PARENT_SCOPE)
     
-    message(STATUS "  Arrow headers fetch fallback failed")
+    message(STATUS "  Configured Arrow external build with out-of-source support")
 endfunction()
