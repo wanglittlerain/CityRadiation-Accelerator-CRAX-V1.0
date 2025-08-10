@@ -307,6 +307,11 @@ function(fetch_arrow_headers_fallback)
     
     set(ARROW_INSTALL_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/arrow-install")
     
+    # Create install directories to avoid path errors
+    file(MAKE_DIRECTORY "${ARROW_INSTALL_PREFIX}")
+    file(MAKE_DIRECTORY "${ARROW_INSTALL_PREFIX}/include")
+    file(MAKE_DIRECTORY "${ARROW_INSTALL_PREFIX}/lib")
+    
     # Build Arrow as external project with complete isolation
     message(STATUS "  Building Arrow as isolated external project...")
     ExternalProject_Add(
@@ -316,7 +321,7 @@ function(fetch_arrow_headers_fallback)
         CMAKE_ARGS
             -DCMAKE_INSTALL_PREFIX=${ARROW_INSTALL_PREFIX}
             -DCMAKE_BUILD_TYPE=Release
-            -DARROW_BUILD_STATIC=ON
+            -DARROW_BUILD_STATIC=OFF
             -DARROW_BUILD_SHARED=ON
             -DARROW_BUILD_TESTS=OFF
             -DARROW_BUILD_EXAMPLES=OFF
@@ -328,17 +333,15 @@ function(fetch_arrow_headers_fallback)
         INSTALL_DIR ${ARROW_INSTALL_PREFIX}
     )
     
-    # Wait for build to complete
-    ExternalProject_Get_Property(arrow_external install_dir)
-    
-    # Create imported target after build
+    # Create imported target with pre-created directories
     add_library(Arrow::arrow_shared SHARED IMPORTED GLOBAL)
     set_target_properties(Arrow::arrow_shared PROPERTIES
-        IMPORTED_LOCATION "${install_dir}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}arrow${CMAKE_SHARED_LIBRARY_SUFFIX}"
-        INTERFACE_INCLUDE_DIRECTORIES "${install_dir}/include"
+        IMPORTED_LOCATION "${ARROW_INSTALL_PREFIX}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}arrow${CMAKE_SHARED_LIBRARY_SUFFIX}"
+        INTERFACE_INCLUDE_DIRECTORIES "${ARROW_INSTALL_PREFIX}/include"
+        INTERFACE_COMPILE_DEFINITIONS "ARROW_STATIC=0"
     )
     
-    # Make sure Arrow is built before our target
+    # Make sure Arrow is built before any target that uses it
     add_dependencies(Arrow::arrow_shared arrow_external)
     
     message(STATUS "  Arrow external build configured")
