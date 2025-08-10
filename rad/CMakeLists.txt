@@ -14,9 +14,15 @@ if(USE_DYNAMIC_ARROW)
 		set(LinkLib PRIVATE common)
 	endif()
 elseif(MSVC)
-	# Traditional static Arrow linking for MSVC
-	message(STATUS "Using static Arrow linking for MSVC radiation target")
-	set(LinkLib PRIVATE arrow common)
+	# Check if we have the Arrow::arrow_shared target (from fallback build)
+	if(TARGET Arrow::arrow_shared)
+		message(STATUS "Using Arrow::arrow_shared target for MSVC radiation target")
+		set(LinkLib PRIVATE Arrow::arrow_shared common)
+	else()
+		# Traditional static Arrow linking for MSVC
+		message(STATUS "Using static Arrow linking for MSVC radiation target")
+		set(LinkLib PRIVATE arrow common)
+	endif()
 else()
 	# Traditional Unix behavior - try to find Arrow, fallback gracefully
 	message(STATUS "Using traditional Arrow detection for Unix radiation target")
