@@ -60,23 +60,3 @@ if(USE_AUTOMATED_DEPENDENCIES)
 		target_link_libraries(common PUBLIC nlohmann_json::nlohmann_json)
 	endif()
 endif()
-
-# 1. Try local static Arrow first
-if(EXISTS "./thirdparty/arrow20.0.0")
-    include_directories(./thirdparty/arrow20.0.0)
-    target_link_libraries(common PUBLIC arrow)
-    message(STATUS "Found local Arrow: Linking with local static Arrow")
-elseif(USE_DYNAMIC_ARROW)
-    # 2. Try dynamic Arrow if requested	
-    find_package(Arrow QUIET)
-    if(TARGET Arrow::arrow_shared)
-        target_link_libraries(common PUBLIC Arrow::arrow_shared)
-		get_target_property(_arrow_location Arrow::arrow_shared LOCATION)
-        message(STATUS "Linking with Arrow::arrow_shared: ${_arrow_location}")
-    else()
-        message(WARNING "Dynamic Arrow requested but not found, linking without Arrow")
-    endif()
-else()
-    # 3. No Arrow
-    message(WARNING "No Arrow linked")
-endif()
