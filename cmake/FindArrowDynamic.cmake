@@ -5,53 +5,38 @@
 # Function to setup Arrow dependencies
 function(setup_arrow_dependency)
     message(STATUS "Setting up Arrow dependency...")
-    message(STATUS "  USE_DYNAMIC_ARROW: ${USE_DYNAMIC_ARROW}")
-    message(STATUS "  PREFER_PYARROW: ${PREFER_PYARROW}")
 
     set(arrow_found FALSE)
     set(arrow_source "none")
     
-    if(USE_DYNAMIC_ARROW)
-        # Try dynamic linking sources
-        if(PREFER_PYARROW)
-            detect_pyarrow_installation()
-            if(TARGET Arrow::arrow_shared)
-                set(arrow_found TRUE)
-                set(arrow_source "pyarrow")
-                message(STATUS "Arrow found via: ${arrow_source}")
-                return()
-            endif()
-        endif()
-        
-        # Try system Arrow if pyarrow not found or not preferred
-        if(NOT arrow_found)
-            detect_system_arrow()
-            if(TARGET Arrow::arrow_shared)
-                set(arrow_found TRUE)
-                set(arrow_source "system")
-                message(STATUS "Arrow found via: ${arrow_source}")
-                return()
-            endif()
-        endif()
-        
-        # If still not found and pyarrow wasn't tried, try it now
-        if(NOT arrow_found AND NOT PREFER_PYARROW)
-            detect_pyarrow_installation()
-            if(TARGET Arrow::arrow_shared)
-                set(arrow_found TRUE)
-                set(arrow_source "pyarrow")
-                message(STATUS "Arrow found via: ${arrow_source}")
-                return()
-            endif()
+    # Try dynamic linking sources
+    if(PREFER_PYARROW)
+        detect_pyarrow_installation()
+        if(TARGET Arrow::arrow_shared)
+            set(arrow_found TRUE)
+            set(arrow_source "pyarrow")
+            message(STATUS "Arrow found via: ${arrow_source}")
+            return()
         endif()
     endif()
     
-    # Fall back to static Arrow for Windows or if dynamic not found/requested
+    # Try system Arrow if pyarrow not found or not preferred
     if(NOT arrow_found)
-        detect_static_arrow()
-        if(TARGET Arrow::arrow_static OR DEFINED ARROW_STATIC_LIBS)
+        detect_system_arrow()
+        if(TARGET Arrow::arrow_shared)
             set(arrow_found TRUE)
-            set(arrow_source "static")
+            set(arrow_source "system")
+            message(STATUS "Arrow found via: ${arrow_source}")
+            return()
+        endif()
+    endif()
+    
+    # If still not found and pyarrow wasn't tried, try it now
+    if(NOT arrow_found AND NOT PREFER_PYARROW)
+        detect_pyarrow_installation()
+        if(TARGET Arrow::arrow_shared)
+            set(arrow_found TRUE)
+            set(arrow_source "pyarrow")
             message(STATUS "Arrow found via: ${arrow_source}")
             return()
         endif()
@@ -59,7 +44,7 @@ function(setup_arrow_dependency)
 
     # If no Arrow found, create empty target and warn
     if(NOT TARGET Arrow::arrow_shared)
-        message(FATAL_ERROR "Arrow::arrow_shared target not found")
+        message(WARNING "Arrow::arrow_shared target not found")
     endif()
 endfunction()
 
@@ -233,25 +218,4 @@ function(detect_system_arrow)
     endif()
     
     message(STATUS "  System Arrow not found")
-endfunction()
-
-# Detect static Arrow installation (Windows fallback)
-function(detect_static_arrow)
-    message(STATUS "Looking for static Arrow installation...")
-    
-    if(MSVC)
-        set(ARROW_STATIC_PATH "${CMAKE_CURRENT_SOURCE_DIR}/common/thirdparty/arrow20.0.0")
-        if(EXISTS "${ARROW_STATIC_PATH}")
-            message(STATUS "  Found static Arrow at: ${ARROW_STATIC_PATH}")
-            
-            # Set variables for MSVC static linking (matching existing pattern)
-            set(ARROW_STATIC_LIBS "arrow" PARENT_SCOPE)
-            set(ARROW_STATIC_INCLUDE_DIR "${ARROW_STATIC_PATH}" PARENT_SCOPE)
-            set(ARROW_FOUND TRUE PARENT_SCOPE)
-            set(ARROW_SOURCE "static" PARENT_SCOPE)
-            return()
-        endif()
-    endif()
-    
-    message(STATUS "  Static Arrow not found or not applicable for this platform")
 endfunction()
