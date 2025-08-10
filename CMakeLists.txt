@@ -11,7 +11,6 @@ include(FindArrowDynamic)
 # Options for dependency management (defaults maintain backwards compatibility)
 option(USE_AUTOMATED_DEPENDENCIES "Use automated dependency fetching instead of static folder" OFF)
 option(USE_DYNAMIC_ARROW "Use dynamic Arrow linking (via system or pyarrow)" OFF)
-option(PREFER_PYARROW "Prefer pyarrow installation over system Arrow" ON)
 
 # Setup dependencies based on options
 if(USE_AUTOMATED_DEPENDENCIES)
