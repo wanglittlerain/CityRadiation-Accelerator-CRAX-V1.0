@@ -336,14 +336,12 @@ function(fetch_arrow_headers_fallback)
         -DARROW_DEPENDENCY_SOURCE=BUNDLED
     )
     
-    # Add Windows-specific CMake policies and compiler flags
+    # Add Windows-specific CMake policies to handle CMake 4.x compatibility issues
     if(WIN32)
         list(APPEND ARROW_CMAKE_ARGS
             -DCMAKE_POLICY_DEFAULT_CMP0077=NEW
             -DCMAKE_POLICY_DEFAULT_CMP0135=NEW
             -DCMAKE_POLICY_DEFAULT_CMP0091=NEW
-            -DCMAKE_CXX_FLAGS="/W3 /wd4996"
-            -DCMAKE_C_FLAGS="/W3 /wd4996"
         )
     endif()
 
