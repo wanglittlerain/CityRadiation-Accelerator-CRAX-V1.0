@@ -2,12 +2,6 @@
 # Advanced Arrow detection with multiple source support including pyarrow
 # This module finds Arrow libraries with preference for dynamic linking
 
-cmake_minimum_required(VERSION 3.27.2)
-
-# Options for Arrow detection
-option(USE_DYNAMIC_ARROW "Use dynamic Arrow linking (via system or pyarrow)" OFF)
-option(PREFER_PYARROW "Prefer pyarrow installation over system Arrow" ON)
-
 # Function to setup Arrow dependencies
 function(setup_arrow_dependency)
     message(STATUS "Setting up Arrow dependency...")
