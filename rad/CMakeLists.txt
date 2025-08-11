@@ -9,10 +9,11 @@ add_executable(radiation ${CODELIST})
 
 # Arrow dependency for radiation target
 # 1. Try local static Arrow first
-if(EXISTS "${CMAKE_SOURCE_DIR}/common/thirdparty/arrow20.0.0")
-    include_directories("${CMAKE_SOURCE_DIR}/common/thirdparty/arrow20.0.0")
+set(STATIC_ARROW_DIR "${CMAKE_SOURCE_DIR}/common/thirdparty/arrow20.0.0")
+if(EXISTS "${STATIC_ARROW_DIR}")
+    include_directories("${STATIC_ARROW_DIR}")
     set(ARROW_LIBS arrow)
-    message(STATUS "Found local Arrow: Linking radiation with local static Arrow")
+    message(STATUS "Linking radiation with local static Arrow: ${STATIC_ARROW_DIR}")
 elseif(USE_DYNAMIC_ARROW)
     # 2. Try dynamic Arrow if requested	
     find_package(Arrow QUIET)
